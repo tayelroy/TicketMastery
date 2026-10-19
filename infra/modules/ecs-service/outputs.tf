@@ -1,3 +1,8 @@
+output "task_subnet_ids" {
+  description = "Subnets the ECS service places tasks in (public or private tier, one or all AZs depending on tasks_in_public_subnets / tasks_single_az)."
+  value       = local.task_subnet_ids
+}
+
 output "cluster_name" {
   description = "ECS cluster name."
   value       = aws_ecs_cluster.this.name

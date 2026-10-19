@@ -14,12 +14,12 @@ output "azs" {
 }
 
 output "public_subnet_ids" {
-  description = "Public subnet IDs (ALB, NAT), one per AZ."
+  description = "Public subnet IDs (ALB, NAT, and the ECS tasks in implementation mode), one per AZ."
   value       = aws_subnet.public[*].id
 }
 
 output "private_subnet_ids" {
-  description = "Private subnet IDs (ECS tasks, RDS, Lambdas), one per AZ."
+  description = "Private subnet IDs (RDS, VPC Lambdas, and the ECS tasks in the HA design), one per AZ."
   value       = aws_subnet.private[*].id
 }
 

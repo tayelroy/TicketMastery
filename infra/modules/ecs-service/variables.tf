@@ -9,13 +9,25 @@ variable "vpc_id" {
 }
 
 variable "public_subnet_ids" {
-  description = "Public subnets for the internet-facing ALB."
+  description = "Public subnets (one per AZ) for the internet-facing ALB, and for the Fargate tasks when tasks_in_public_subnets = true."
   type        = list(string)
 }
 
 variable "private_subnet_ids" {
-  description = "Private subnets for Fargate tasks. Tasks get no public IP, so these subnets need a NAT route or VPC endpoints (S3 gateway + ecr.api, ecr.dkr, logs, secretsmanager) to pull images, ship logs and read secrets."
+  description = "Private subnets (one per AZ) for Fargate tasks when tasks_in_public_subnets = false. Tasks then get no public IP, so these subnets need a NAT route or VPC endpoints (S3 gateway + ecr.api, ecr.dkr, logs, secretsmanager) to pull images, ship logs and read secrets."
   type        = list(string)
+}
+
+variable "tasks_in_public_subnets" {
+  description = "Implementation/cost mode: run tasks in public_subnet_ids with a public IP so they need no NAT gateway or interface endpoints. Inbound stays limited to the ALB security group. false = HA/production design: tasks in private_subnet_ids, no public IP."
+  type        = bool
+  default     = false
+}
+
+variable "tasks_single_az" {
+  description = "Place tasks only in the first subnet (first AZ) of the selected tier. false spreads tasks across every AZ (HA design)."
+  type        = bool
+  default     = false
 }
 
 variable "alb_sg_id" {

@@ -22,6 +22,11 @@ output "private_subnet_ids" {
   value       = module.network.private_subnet_ids
 }
 
+output "task_subnet_ids" {
+  description = "Subnets the API tasks run in: the AZ a public subnet in implementation mode; private subnets in the HA design."
+  value       = module.ecs_service.task_subnet_ids
+}
+
 ################################################################################
 # Security groups
 ################################################################################
@@ -112,6 +117,11 @@ output "db_port" {
 output "db_name" {
   description = "Database name."
   value       = module.rds.db_name
+}
+
+output "db_availability_zone" {
+  description = "AZ of the DB instance (AZ a when single-AZ; the current primary when Multi-AZ)."
+  value       = module.rds.availability_zone
 }
 
 output "db_secret_arn" {

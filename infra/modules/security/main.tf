@@ -71,7 +71,9 @@ resource "aws_vpc_security_group_ingress_rule" "ecs_from_alb" {
 }
 
 # Tasks need outbound HTTPS to ECR/Logs/Secrets Manager/SQS/SNS/DynamoDB
-# (via NAT or VPC endpoints) and 5432 to RDS.
+# (via their public IP in implementation mode, or NAT / VPC endpoints in
+# private subnets) and 5432 to RDS. Inbound stays ALB-only (ecs_from_alb), so
+# a task's public IP accepts no direct connections.
 resource "aws_vpc_security_group_egress_rule" "ecs_all" {
   security_group_id = aws_security_group.ecs.id
   description       = "All outbound"

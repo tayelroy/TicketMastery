@@ -36,6 +36,9 @@ resource "aws_db_instance" "this" {
   vpc_security_group_ids = [var.rds_sg_id]
   publicly_accessible    = false
   multi_az               = var.multi_az
+  # Pins a single-AZ instance to one AZ (null = AWS picks). Must be null when
+  # multi_az = true; RDS rejects both together (see the precondition below).
+  availability_zone = var.availability_zone
 
   # Default parameter group for the family; PostgreSQL 15+ defaults rds.force_ssl = 1.
 
@@ -51,5 +54,12 @@ resource "aws_db_instance" "this" {
 
   tags = {
     Name = "${var.name}-postgres"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !(var.multi_az && var.availability_zone != null)
+      error_message = "availability_zone must be null when multi_az = true (RDS rejects both together)."
+    }
   }
 }

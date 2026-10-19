@@ -27,9 +27,9 @@ variable "vpc_cidr" {
 }
 
 variable "enable_nat_gateway" {
-  description = "Create NAT gateway(s) for private subnet egress (~USD 45/month each)."
+  description = "Create NAT gateway(s) for private-subnet egress (~USD 43/month each + USD 0.059/GB). Needed only when tasks_in_public_subnets = false (unless enable_vpc_endpoints covers it) or for in-VPC Lambdas that call AWS APIs/the internet."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "single_nat_gateway" {
@@ -112,6 +112,18 @@ variable "cpu_architecture" {
   default     = "X86_64"
 }
 
+variable "tasks_in_public_subnets" {
+  description = "Implementation/cost mode: run API tasks in the public subnets with a public IP (egress without NAT). Inbound still only from the ALB SG. false = HA design: private subnets, egress via NAT or interface endpoints."
+  type        = bool
+  default     = true
+}
+
+variable "tasks_single_az" {
+  description = "Run API tasks only in the first AZ (implementation mode). false spreads tasks across both AZs (HA design)."
+  type        = bool
+  default     = true
+}
+
 variable "desired_count" {
   description = "Number of API tasks."
   type        = number
@@ -149,15 +161,21 @@ variable "log_retention_days" {
 }
 
 variable "enable_autoscaling" {
-  description = "Enable ECS service autoscaling on CPU and ALB request count."
+  description = "Enable ECS service autoscaling on CPU and ALB request count. Off for the implementation; on in the HA design."
   type        = bool
-  default     = true
+  default     = false
+}
+
+variable "autoscaling_min_capacity" {
+  description = "Minimum API task count when autoscaling. Use 2 in the HA design so scale-in never drops below one task per AZ."
+  type        = number
+  default     = 1
 }
 
 variable "autoscaling_max_capacity" {
   description = "Maximum API task count when autoscaling."
   type        = number
-  default     = 4
+  default     = 2
 }
 
 ################################################################################

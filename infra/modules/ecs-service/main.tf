@@ -106,6 +106,22 @@ resource "aws_ecs_task_definition" "api" {
 # Service
 ################################################################################
 
+locals {
+  # Public-subnet mode (tasks_in_public_subnets = true) is the implementation /
+  # cost mode agreed with the instructor: no NAT gateway. Each task gets a
+  # public IP, and that IP (via the IGW) is its egress to ECR, CloudWatch Logs,
+  # Secrets Manager and the Cognito JWKS. Inbound is still only allowed from
+  # the ALB security group (ecs_sg), so the public IP is not directly reachable.
+  #
+  # Private-subnet mode (false) is the HA / production target: no public IP,
+  # egress through NAT or VPC interface endpoints.
+  #
+  # tasks_single_az keeps only the first subnet (AZ a), so every task runs in
+  # one AZ; false spreads tasks across both AZs.
+  task_subnet_pool = var.tasks_in_public_subnets ? var.public_subnet_ids : var.private_subnet_ids
+  task_subnet_ids  = var.tasks_single_az ? slice(local.task_subnet_pool, 0, 1) : local.task_subnet_pool
+}
+
 resource "aws_ecs_service" "api" {
   name             = "${var.name}-api"
   cluster          = aws_ecs_cluster.this.id
@@ -115,9 +131,9 @@ resource "aws_ecs_service" "api" {
   platform_version = "LATEST"
 
   network_configuration {
-    subnets          = var.private_subnet_ids
+    subnets          = local.task_subnet_ids
     security_groups  = [var.ecs_sg_id]
-    assign_public_ip = false
+    assign_public_ip = var.tasks_in_public_subnets
   }
 
   load_balancer {

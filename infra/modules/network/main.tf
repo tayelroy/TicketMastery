@@ -43,6 +43,13 @@ resource "aws_internet_gateway" "this" {
 # Subnets
 ################################################################################
 
+# Always two AZs with one public + one private subnet each, even when the
+# implementation runs single-AZ (envs/dev tasks_single_az = true, RDS pinned to
+# AZ a): an internet-facing ALB requires subnets in at least two AZs, and an
+# RDS DB subnet group must cover at least two AZs even for a single-AZ
+# instance. In implementation mode the API task and the DB both run in the
+# first AZ; the second AZ's subnets hold only an ALB node.
+
 resource "aws_subnet" "public" {
   count = local.az_count
 
@@ -50,7 +57,9 @@ resource "aws_subnet" "public" {
   cidr_block        = cidrsubnet(var.vpc_cidr, 8, count.index)
   availability_zone = local.azs[count.index]
 
-  # Only the ALB and NAT live here; neither needs auto-assigned public IPs.
+  # ALB, NAT (if enabled) and, in implementation mode, the Fargate tasks live
+  # here. Fargate sets its own public IP (assign_public_ip), so nothing needs
+  # auto-assigned public IPs.
   map_public_ip_on_launch = false
 
   tags = {

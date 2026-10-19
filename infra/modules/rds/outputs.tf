@@ -32,3 +32,8 @@ output "instance_arn" {
   description = "DB instance ARN."
   value       = aws_db_instance.this.arn
 }
+
+output "availability_zone" {
+  description = "AZ of the DB instance (the primary, when Multi-AZ)."
+  value       = aws_db_instance.this.availability_zone
+}

@@ -15,7 +15,7 @@ variable "vpc_cidr" {
 }
 
 variable "enable_nat_gateway" {
-  description = "Create NAT gateway(s) so private subnets (ECS tasks) get outbound internet access. ~USD 45/month per NAT plus data processing."
+  description = "Create NAT gateway(s) so private subnets (ECS tasks in the HA design, VPC Lambdas) get outbound internet access. ~USD 43/month per NAT (USD 0.059/h in ap-southeast-1) plus USD 0.059/GB processed."
   type        = bool
   default     = true
 }
@@ -27,7 +27,7 @@ variable "single_nat_gateway" {
 }
 
 variable "enable_gateway_endpoints" {
-  description = "Create S3 and DynamoDB gateway endpoints on the private route tables. Free; keeps S3/DynamoDB traffic off the NAT. ECR image layers are served from S3, so this is required for image pulls when NAT is disabled."
+  description = "Create S3 and DynamoDB gateway endpoints on the private route tables. Free; keeps S3/DynamoDB traffic off the NAT. ECR image layers are served from S3, so this is required for image pulls by private-subnet tasks when NAT is disabled."
   type        = bool
   default     = true
 }
