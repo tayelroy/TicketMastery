@@ -1,0 +1,60 @@
+# CODEOWNERS for TicketMastery
+#
+# >>> TODO: replace every *_GH_HANDLE placeholder with the teammate's real GitHub handle. <<<
+# GitHub does not recognise a placeholder or unknown user. Those owners are skipped, so no
+# review is requested from them, and the CODEOWNERS file view shows an error until it is fixed.
+# Owners also need write access to the repo.
+#
+# Placeholders:
+#   @CODY_GH_HANDLE     Cody     - S3/CloudFront/WAF/Route 53, deploy pipeline, AWS account, UC1
+#   @ANDREW_GH_HANDLE   Andrew   - Cognito, API Gateway, UC2
+#   @NAIXIN_GH_HANDLE   Nai Xin  - frontend, UC1
+#   @YANTING_GH_HANDLE  Yan Ting - UC3 waiting room (possibly @yantingor14; confirm before replacing)
+#   @SHIHUI_GH_HANDLE   Shi Hui  - UC4 checkout + e-tickets
+#   @tayelroy           Elroy    - shared base + UC5
+#
+# The LAST matching pattern wins, so general rules come first and specific ones after.
+# Review enforcement needs branch protection on main with "Require review from Code Owners".
+
+# Default: anything not matched below (root files, docs, .github).
+*                                                       @tayelroy
+
+# --- Repo plumbing (shared) ---------------------------------------------------
+/.github/                                               @tayelroy @CODY_GH_HANDLE
+/docs/                                                  @tayelroy @CODY_GH_HANDLE @ANDREW_GH_HANDLE @NAIXIN_GH_HANDLE @YANTING_GH_HANDLE @SHIHUI_GH_HANDLE
+
+# --- Infrastructure -------------------------------------------------------------
+# Base stack: envs/dev root + network, security, ecr, rds, ecs-service modules.
+/infra/                                                 @tayelroy
+/infra/modules/edge/                                    @CODY_GH_HANDLE
+/infra/modules/auth-apigw/                              @ANDREW_GH_HANDLE
+/infra/modules/waiting-room/                            @YANTING_GH_HANDLE
+/infra/modules/messaging/                               @SHIHUI_GH_HANDLE
+
+# --- Backend service (one service hosts UC1-UC5) --------------------------------
+# Base: src/app.ts, src/db/, src/auth/, src/modules/index.ts, migrations/README.md,
+# Dockerfile, compose, package.json, and everything not listed below.
+/services/ticketmastery-api/                            @tayelroy
+
+/services/ticketmastery-api/src/modules/discovery/      @CODY_GH_HANDLE @NAIXIN_GH_HANDLE
+/services/ticketmastery-api/src/modules/account/        @ANDREW_GH_HANDLE
+/services/ticketmastery-api/src/modules/waiting-room/   @YANTING_GH_HANDLE
+/services/ticketmastery-api/src/modules/checkout/       @SHIHUI_GH_HANDLE
+/services/ticketmastery-api/src/modules/organiser/      @tayelroy
+
+# Migrations by use-case tag (NNNN_<uc>_<description>.sql).
+/services/ticketmastery-api/migrations/*_uc1_*          @CODY_GH_HANDLE @NAIXIN_GH_HANDLE
+/services/ticketmastery-api/migrations/*_uc2_*          @ANDREW_GH_HANDLE
+/services/ticketmastery-api/migrations/*_uc3_*          @YANTING_GH_HANDLE
+/services/ticketmastery-api/migrations/*_uc4_*          @SHIHUI_GH_HANDLE
+/services/ticketmastery-api/migrations/*_uc5_*          @tayelroy
+/services/ticketmastery-api/migrations/README.md        @tayelroy
+
+# --- Frontend -----------------------------------------------------------------------
+/frontend/                                              @NAIXIN_GH_HANDLE
+
+# --- Lambdas ------------------------------------------------------------------------
+/lambdas/                                               @tayelroy
+/lambdas/queue-manager/                                 @YANTING_GH_HANDLE
+/lambdas/ticket-fn/                                     @SHIHUI_GH_HANDLE
+# /lambdas/hold-sweeper/  owner TBC (open question: queue-manager vs separate sweeper)

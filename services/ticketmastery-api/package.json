@@ -1,0 +1,35 @@
+{
+  "name": "ticketmastery-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TicketMastery backend API (ECS Fargate service): concerts, organiser management, seat inventory.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/server.ts",
+    "build": "tsc -p .",
+    "start": "node dist/server.js",
+    "migrate": "node dist/db/migrate.js",
+    "migrate:dev": "tsx --env-file=.env src/db/migrate.ts",
+    "seed": "tsx --env-file=.env src/db/seed.ts",
+    "seed:prod": "node dist/db/seed.js",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts"
+  },
+  "dependencies": {
+    "express": "^4.22.3",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "@types/node": "^20.19.43",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3"
+  }
+}

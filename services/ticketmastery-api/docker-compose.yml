@@ -1,0 +1,60 @@
+# Local development stack: Postgres 16 + the API.
+#   docker compose up --build                      # API on http://localhost:3000 (migrations run on start)
+#   docker compose run --rm api node dist/db/seed.js
+#   docker compose --profile tools run --rm migrate
+name: ticketmastery
+
+x-api-env: &api-env
+  NODE_ENV: development
+  PORT: "3000"
+  LOG_LEVEL: info
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: ticketmastery
+  DB_USER: tm
+  DB_PASSWORD: tm_local_dev_only # LOCAL DEV ONLY
+  DB_SSL: "false"
+  AUTH_MODE: dev-header
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      # LOCAL DEVELOPMENT ONLY. These credentials must never be used for RDS or any shared environment.
+      POSTGRES_DB: ticketmastery
+      POSTGRES_USER: tm
+      POSTGRES_PASSWORD: tm_local_dev_only
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # TCP, not the unix socket: during first-run init Postgres briefly runs socket-only, then restarts.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U tm -d ticketmastery"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *api-env
+      RUN_MIGRATIONS_ON_START: "true"
+    ports:
+      - "3000:3000"
+
+  # One-shot migration runner (mirrors a separate ECS migrate task): docker compose --profile tools run --rm migrate
+  migrate:
+    build: .
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *api-env
+    command: ["node", "dist/db/migrate.js"]
+
+volumes:
+  pgdata:
