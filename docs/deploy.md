@@ -30,7 +30,7 @@ cp terraform.tfvars.example terraform.tfvars   # gitignored; never commit it
 terraform init
 ```
 
-The defaults are sized for dev: one NAT gateway, `db.t4g.micro`, single-AZ RDS, and one 0.25 vCPU / 0.5 GB task. `terraform.tfvars.example` documents every toggle. Put no secrets in `terraform.tfvars`. The DB password is generated and stored by RDS.
+The defaults build the **implementation** mode agreed with the instructor (single-AZ, no NAT gateway, no HA; see [architecture.md](architecture.md#implementation-vs-target-ha-design)): **no NAT gateway**, one 0.25 vCPU / 0.5 GB task in the **AZ a public subnet with a public IP** (its egress to ECR, CloudWatch Logs, Secrets Manager, and Cognito; inbound is still only from the ALB security group), `db.t4g.micro` single-AZ RDS pinned to AZ a in the private subnets, and autoscaling off. `terraform.tfvars.example` documents every toggle and has a commented block for the HA target design. Put no secrets in `terraform.tfvars`. The DB password is generated and stored by RDS.
 
 ## First deploy (empty ECR)
 
@@ -82,7 +82,7 @@ cd infra/envs/dev
 curl -i "http://$(terraform output -raw alb_dns_name)/health"
 ```
 
-Expect `200` with `{"status":"ok","db":"ok",...}`. A `503` with JSON `"db":"down"` comes from the API itself: the API can't reach the database (check the SG chain, the secret, and `DB_SSL`). A plain `502`/`503` page from the ALB means no task is registered or running yet. `/health/live` answers without touching the DB. If it isn't healthy after a few minutes:
+Expect `200` with `{"status":"ok","db":"ok",...}`. A `503` with JSON `"db":"down"` comes from the API itself: the API can't reach the database (check the SG chain, the secret, and `DB_SSL`). A plain `502`/`503` page from the ALB means no task is registered or running yet. `/health/live` answers without touching the DB. Always test through the ALB: the task's public IP accepts no inbound connections (only the ALB security group may connect). If it isn't healthy after a few minutes:
 
 ```bash
 aws logs tail "$(terraform output -raw log_group_name)" --follow
@@ -116,6 +116,20 @@ Print it only when you need it. Never paste it into chat, code, `.env` files, or
 
 Whether Cody's pipeline takes this over is an [open question](architecture.md#open-questions).
 
+## Switching to the HA target design
+
+The HA design is for the diagram and report. Deploy it only if the team agrees to the cost (≈ USD 190/month instead of ≈ 69; see [cost-estimate.md](cost-estimate.md)). Copy the values from the commented "HA / target design" block at the bottom of `terraform.tfvars.example` into `terraform.tfvars`. Apply in two steps, so the NAT routes exist before tasks move into the private subnets:
+
+1. Network first: set `enable_nat_gateway = true` and `single_nat_gateway = false` (or `enable_vpc_endpoints = true`), then `terraform plan -out tfplan && terraform apply tfplan`.
+2. Everything else: set `tasks_in_public_subnets = false`, `tasks_single_az = false`, `desired_count = 2`, `enable_autoscaling = true`, `autoscaling_min_capacity = 2`, `autoscaling_max_capacity = 4`, `db_multi_az = true`, `db_deletion_protection = true`, `db_backup_retention_period = 7`, then plan and apply again.
+
+What the plan does:
+
+- **ECS service**: changing `tasks_in_public_subnets` or `tasks_single_az` is an **in-place update** of the service's network configuration (`~ update in-place`, not a replacement). ECS starts a new deployment: tasks in the new subnets start and register with the ALB, then the old tasks drain and stop. Expect a brief task replacement, not an outage. If the new tasks can't pull the image (e.g. no NAT route yet), the circuit breaker rolls back; fix the egress and apply again.
+- **RDS**: `db_multi_az = true` converts the instance in place and removes the AZ pin. Do it outside a demo.
+
+Going back to the implementation mode is the reverse: restore the defaults. One apply is fine, because tasks in the public subnet don't need the NAT gateway. **Read the plan before applying:** with `db_multi_az = false`, the DB is pinned to AZ a again, and `availability_zone` can't be changed in place. If the current primary is in AZ b (e.g. after a failover), Terraform plans `aws_db_instance.this must be replaced` and **all data is lost**. The same applies the first time you apply this version against a stack created before the AZ pin existed, if RDS had placed the instance outside AZ a. Check with `aws rds describe-db-instances --query 'DBInstances[].AvailabilityZone'`, and don't apply a DB replacement you didn't intend.
+
 ## Optional: remote state
 
 State is local by default (`backend.tf`). To share it, the account owner creates the backend once:
@@ -131,7 +145,7 @@ terraform init -migrate-state
 
 ## Teardown
 
-Destroy when you aren't demoing. The stack costs about USD 3.7/day (see [cost-estimate.md](cost-estimate.md)).
+Destroy when you aren't demoing. The default (implementation-mode) stack costs about USD 2.3/day; the HA target design about USD 6.3/day (see [cost-estimate.md](cost-estimate.md)). If you deployed the HA design, set `db_deletion_protection = false` and apply before destroying.
 
 ```bash
 cd infra/envs/dev

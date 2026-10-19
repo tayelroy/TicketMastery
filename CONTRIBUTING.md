@@ -99,6 +99,7 @@ The `infra/README.md` has a worked example.
 1. Put your resources in your own module, `infra/modules/<name>/` (`edge`, `auth-apigw`, `waiting-room`, `messaging`, …), with `versions.tf`, `variables.tf`, `main.tf`, and `outputs.tf`.
 2. Wire it into `infra/envs/dev/main.tf` with a `module "<name>"` block. Pass shared values in as variables taken from base outputs. Don't look up or hardcode IDs. Available outputs include `vpc_id`, `private_subnet_ids`, `public_subnet_ids`, `ecs_sg_id`, `rds_sg_id`, `db_secret_arn`, `alb_listener_arn`, `alb_dns_name`, and `task_role_name`.
 3. Grant the API access from inside your module with a least-privilege `aws_iam_role_policy` on `task_role_name`. Pass non-secret values to the API through `extra_environment`.
+   - **Lambdas and the VPC**: there is **no NAT gateway by default** (implementation mode, see [docs/architecture.md](docs/architecture.md#lambdas-and-the-vpc-no-nat-by-default)). An in-VPC Lambda never gets a public IP, even in a public subnet, so it has no internet or AWS-API egress. Keep Lambdas (`queue-manager`, `ticket-fn`) **outside the VPC** unless they must reach RDS. If one needs RDS, put it in `private_subnet_ids` with its own SG, add that SG to `rds_extra_ingress_sg_ids`, and add only the endpoints it needs: the DynamoDB/S3 gateway endpoints are free and already on; SQS/SNS/Secrets Manager interface endpoints cost ~USD 0.013/h per AZ each. Alternatively set `enable_nat_gateway = true` (~USD 43/month); agree that with the team first.
 4. Before opening a PR, run:
 
    ```bash

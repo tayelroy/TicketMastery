@@ -39,16 +39,16 @@ Organisers (verified via a Cognito group) create and manage concerts, ticket typ
 
 ## Architecture
 
-Deployed in the **ap-southeast-1 (Singapore)** region across two Availability Zones.
+Designed for the **ap-southeast-1 (Singapore)** region across two Availability Zones. The sections below describe that **target (HA) design**. The deployed build is a single-AZ implementation of it; see [Implementation vs target (HA) design](#implementation-vs-target-ha-design).
 
 **Edge & routing**
 - Route 53 (DNS) → CloudFront + WAF (edge cache, bot filtering) → API Gateway
 
 **Compute**
-- ECS Fargate service `ticketmastery-api` in private subnets across AZ A & AZ B, behind an Application Load Balancer. This single service hosts the API routes for all five use cases (UC1–UC5) under `/api/...`, one module per use case. It auto-scales on CPU and request count, and failed tasks are replaced automatically.
+- ECS Fargate service `ticketmastery-api` behind an Application Load Balancer. This single service hosts the API routes for all five use cases (UC1–UC5) under `/api/...`, one module per use case. In the target design it runs in private subnets across AZ A & AZ B, auto-scales on CPU and request count, and failed tasks are replaced automatically.
 
 **Database**
-- Amazon RDS PostgreSQL stores concerts, venues, seats, and orders. It is **single-AZ by default**. The professor confirmed single-AZ is fine for this project. A Terraform toggle (`db_multi_az`) turns on Multi-AZ, which adds a synchronous standby in the second AZ with automatic failover. Automated backups with point-in-time restore are enabled either way.
+- Amazon RDS PostgreSQL stores concerts, venues, seats, and orders. The target design is **Multi-AZ** (synchronous standby in the second AZ with automatic failover). The deployed build is **single-AZ** (the professor confirmed that's fine for this project); a Terraform toggle (`db_multi_az`) turns on Multi-AZ. Automated backups with point-in-time restore are enabled either way.
 
 **Serverless & messaging**
 - SQS FIFO (`join-queue`) + Lambda (`queue-manager`) for the waiting room
@@ -62,13 +62,18 @@ Deployed in the **ap-southeast-1 (Singapore)** region across two Availability Zo
 - `X-Origin-Verify` secret header between API Gateway and the ALB
 - IAM, KMS, CloudTrail, CloudWatch, AWS Budgets
 
-## Availability Strategy
+## Implementation vs target (HA) design
 
-| Layer | Strategy |
-|-------|----------|
-| **Compute** | ECS Fargate across 2 AZs; failed tasks auto-replaced, ALB routes around them |
-| **Database** | RDS single-AZ by default, with automated backups and point-in-time restore. An outage in the database's AZ means DB downtime until AWS recovers or we restore into the other AZ; RTO is TBC. Setting `db_multi_az = true` adds a synchronous standby with automatic failover. See [docs/architecture.md](docs/architecture.md#decision-single-az-rds). |
-| **Serverless** | SQS/SNS/Lambda/S3/SES Multi-AZ by default; SQS retries then routes to a DLQ |
+At the proposal feedback (Oct 2026) the instructor told us to skip the NAT gateway, use one AZ, and not implement HA for the build, but the diagram and report must still show the HA design. The Terraform defaults therefore build the **implementation**; the HA values are one commented block in `infra/envs/dev/terraform.tfvars.example`.
+
+| | Implementation (deployed by default) | Target HA (diagram + report) |
+|---|---|---|
+| Compute | 1 Fargate task in the AZ a public subnet with a public IP (inbound only from the ALB), no NAT gateway, autoscaling off | Tasks in private subnets across 2 AZs, NAT gateway per AZ (or VPC endpoints), autoscaling on CPU and request count |
+| Database | RDS single-AZ, pinned to AZ a. An AZ a outage means downtime until AWS recovers or we restore elsewhere; RTO is TBC | RDS Multi-AZ, automatic failover |
+| Serverless | SQS/SNS/Lambda/S3/SES are Multi-AZ by default; SQS retries then routes to a DLQ | Same |
+| Cost (estimate) | ≈ USD 69/month | ≈ USD 190/month |
+
+Details, the variables to flip, and why two subnets of each kind still exist: [docs/architecture.md](docs/architecture.md#implementation-vs-target-ha-design).
 
 ## Tech Stack
 
