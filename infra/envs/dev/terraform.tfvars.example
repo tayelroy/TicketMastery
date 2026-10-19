@@ -1,0 +1,43 @@
+# Copy to terraform.tfvars (gitignored) and adjust. Every value shown is the default.
+# Credentials come from the environment: export AWS_PROFILE=<your-profile>
+
+aws_region  = "ap-southeast-1"
+project     = "ticketmastery"
+environment = "dev"
+
+# Network / cost toggles
+vpc_cidr                 = "10.20.0.0/16"
+enable_nat_gateway       = true  # ~USD 45/month; tasks need NAT or interface endpoints
+single_nat_gateway       = true  # one NAT in AZ a
+enable_gateway_endpoints = true  # S3 + DynamoDB, free
+enable_vpc_endpoints     = false # ecr.api/ecr.dkr/logs/secretsmanager/sqs, ~USD 95/month
+
+# Security
+alb_ingress_cidrs        = ["0.0.0.0/0"]
+rds_extra_ingress_sg_ids = [] # e.g. ["sg-0123456789abcdef0"] for a VPC Lambda
+certificate_arn          = "" # ACM ARN in ap-southeast-1 enables HTTPS + HTTP->HTTPS redirect
+
+# API service
+image_tag                     = "latest"
+container_port                = 3000
+task_cpu                      = 256
+task_memory                   = 512
+cpu_architecture              = "X86_64" # ARM64 if you push arm64 images
+desired_count                 = 1
+run_migrations_on_start       = true
+auth_mode                     = "dev-header" # MUST be "cognito" once the Cognito authorizer is live
+enable_container_health_check = false
+container_insights            = "disabled"
+log_retention_days            = 14
+enable_autoscaling            = true
+autoscaling_max_capacity      = 4
+ecr_force_delete              = true
+
+# RDS
+db_engine_version          = "16"
+db_instance_class          = "db.t4g.micro"
+db_allocated_storage       = 20
+db_multi_az                = false
+db_backup_retention_period = 1
+db_deletion_protection     = false
+db_skip_final_snapshot     = true
