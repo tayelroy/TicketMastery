@@ -1,0 +1,72 @@
+# =============================================================================
+# TicketMastery root .gitignore
+# Secrets first: if in doubt, ignore it and commit a *.example instead.
+# =============================================================================
+
+# --- Secrets / credentials ---------------------------------------------------
+.env
+.env.*
+!.env.example
+.aws/
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*
+secrets.json
+*.secret
+
+# --- Terraform ---------------------------------------------------------------
+# .terraform.lock.hcl pins provider checksums and MUST be committed.
+!.terraform.lock.hcl
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+tfplan
+*.tfplan
+
+# --- Node / TypeScript -------------------------------------------------------
+node_modules/
+dist/
+build/
+coverage/
+.cache
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Python (Lambdas, scripts) -----------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# --- Lambda / IaC build artifacts --------------------------------------------
+lambdas/**/dist/
+lambdas/**/*.zip
+cdk.out/
+.aws-sam/
+
+# --- Logs ----------------------------------------------------------------------
+*.log
+
+# --- OS / editors ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+# Ignore VS Code settings, but allow sharing recommended extensions.
+.vscode/*
+!.vscode/extensions.json
+*.swp

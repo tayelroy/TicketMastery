@@ -45,10 +45,10 @@ Deployed in the **ap-southeast-1 (Singapore)** region across two Availability Zo
 - Route 53 (DNS) → CloudFront + WAF (edge cache, bot filtering) → API Gateway
 
 **Compute**
-- ECS Fargate (`ticketmastery-api` / `concert-svc`) in private subnets across AZ A & AZ B, behind an Application Load Balancer. Auto-scales on CPU and request count; failed tasks are replaced automatically.
+- ECS Fargate service `ticketmastery-api` in private subnets across AZ A & AZ B, behind an Application Load Balancer. This single service hosts the API routes for all five use cases (UC1–UC5) under `/api/...`, one module per use case. It auto-scales on CPU and request count, and failed tasks are replaced automatically.
 
 **Database**
-- Amazon RDS PostgreSQL (Multi-AZ) — stores concerts, venues, seats, and orders. Synchronous replication to a standby with automatic failover and zero data loss.
+- Amazon RDS PostgreSQL stores concerts, venues, seats, and orders. It is **single-AZ by default**. The professor confirmed single-AZ is fine for this project. A Terraform toggle (`db_multi_az`) turns on Multi-AZ, which adds a synchronous standby in the second AZ with automatic failover. Automated backups with point-in-time restore are enabled either way.
 
 **Serverless & messaging**
 - SQS FIFO (`join-queue`) + Lambda (`queue-manager`) for the waiting room
@@ -67,12 +67,42 @@ Deployed in the **ap-southeast-1 (Singapore)** region across two Availability Zo
 | Layer | Strategy |
 |-------|----------|
 | **Compute** | ECS Fargate across 2 AZs; failed tasks auto-replaced, ALB routes around them |
-| **Database** | RDS Multi-AZ with synchronous replication and automatic failover (zero data loss) |
+| **Database** | RDS single-AZ by default, with automated backups and point-in-time restore. An outage in the database's AZ means DB downtime until AWS recovers or we restore into the other AZ; RTO is TBC. Setting `db_multi_az = true` adds a synchronous standby with automatic failover. See [docs/architecture.md](docs/architecture.md#decision-single-az-rds). |
 | **Serverless** | SQS/SNS/Lambda/S3/SES Multi-AZ by default; SQS retries then routes to a DLQ |
 
 ## Tech Stack
 
 AWS (ECS Fargate, RDS PostgreSQL, DynamoDB, Lambda, SQS, SNS, SES, S3, Cognito, CloudFront, API Gateway, Route 53, WAF, EventBridge, QuickSight, CloudWatch, KMS, IAM)
+
+## Repository layout
+
+```
+.
+├── infra/                      Terraform: envs/dev root + modules (network, security, ecr, rds, ecs-service, + teammates' modules)
+├── services/
+│   └── ticketmastery-api/      Node 20 + Express + TypeScript API (ECS Fargate); modules per use case, SQL migrations
+├── frontend/                   static SPA (S3 + CloudFront); placeholder
+├── lambdas/                    queue-manager (UC3), ticket-fn (UC4); placeholders
+├── docs/                       architecture, deploy guide, cost estimate
+├── .github/                    CODEOWNERS, PR template
+└── CONTRIBUTING.md             workflow, ownership, how to add routes / tables / Terraform
+```
+
+## Getting started
+
+Run the API locally (needs Docker):
+
+```bash
+cd services/ticketmastery-api
+docker compose up --build
+curl http://localhost:3000/health
+```
+
+- [CONTRIBUTING.md](CONTRIBUTING.md): branches, reviews, ownership, adding routes, tables, and Terraform, secrets rules
+- [docs/architecture.md](docs/architecture.md): current design, diagram, decisions, open questions
+- [docs/deploy.md](docs/deploy.md): deploying and tearing down the AWS dev stack
+- [docs/cost-estimate.md](docs/cost-estimate.md): what the dev stack costs per month
+- [infra/README.md](infra/README.md): Terraform modules, inputs, and outputs
 
 ## Team
 
