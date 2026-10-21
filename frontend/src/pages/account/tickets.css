@@ -1,0 +1,254 @@
+/* UC2 My Tickets styles. Shared tokens (--glass, --ink, ...) come from src/app/styles.css. */
+
+.tickets-heading {
+  margin: 0 0 1.25rem;
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+}
+
+.tickets-notice {
+  margin: 0 0 1.25rem;
+  padding: 0.85rem 1.2rem;
+  border-radius: 20px;
+  font-size: 0.92rem;
+}
+
+.ticket-list {
+  display: grid;
+  gap: 1rem;
+  max-width: 720px;
+}
+
+.ticket-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  border-radius: 28px;
+  color: var(--text);
+  text-decoration: none;
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.ticket-row:hover {
+  transform: translateY(-2px);
+  background: var(--glass-strong);
+}
+
+.ticket-thumb {
+  flex: none;
+  width: 88px;
+  height: 88px;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 1.5px dashed rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ticket-thumb img,
+.ticket-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ticket-row-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.ticket-row-info strong {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.ticket-row-info small {
+  color: var(--muted);
+}
+
+.ticket-row-cta {
+  flex: none;
+  padding: 0.6rem 1.1rem;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 520px) {
+  .ticket-row-cta {
+    display: none;
+  }
+}
+
+/* ---------- Ticket detail ---------- */
+
+.ticket-view {
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.ticket-view-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+
+.ticket-view-head h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+.circle-btn,
+.circle-spacer {
+  width: 3rem;
+  height: 3rem;
+  flex: none;
+}
+
+.circle-btn {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #ffffff;
+  color: var(--ink);
+  font-size: 1.6rem;
+  line-height: 1;
+  text-decoration: none;
+  box-shadow: 0 10px 24px -12px rgba(31, 42, 46, 0.6);
+}
+
+.ticket-frame {
+  padding: 0.9rem;
+  border-radius: 36px;
+}
+
+/* No image in the DB yet: an empty framed box. */
+.ticket-image {
+  aspect-ratio: 16 / 10;
+  border-radius: 26px;
+  overflow: hidden;
+  border: 1.5px dashed rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.1);
+  margin-bottom: 0.9rem;
+}
+
+.eticket {
+  --notch: 16px;
+  color: var(--ink);
+}
+
+.eticket-main,
+.eticket-stub {
+  background: #ffffff;
+  padding: 1.5rem 1.5rem 1.25rem;
+}
+
+/* Half-circle notches either side of the tear line above the barcode. */
+.eticket-main {
+  border-radius: 26px 26px 0 0;
+  -webkit-mask:
+    radial-gradient(circle at 0 100%, #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) left / 51% 100% no-repeat,
+    radial-gradient(circle at 100% 100%, #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) right / 51% 100% no-repeat;
+  mask:
+    radial-gradient(circle at 0 100%, #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) left / 51% 100% no-repeat,
+    radial-gradient(circle at 100% 100%, #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) right / 51% 100% no-repeat;
+}
+
+.eticket-stub {
+  border-radius: 0 0 26px 26px;
+  border-top: 2px dashed #f0b3a5;
+  -webkit-mask:
+    radial-gradient(circle at 0 0, #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) left / 51% 100% no-repeat,
+    radial-gradient(circle at 100% 0, #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) right / 51% 100% no-repeat;
+  mask:
+    radial-gradient(circle at 0 0, #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) left / 51% 100% no-repeat,
+    radial-gradient(circle at 100% 0, #0000 var(--notch), #000 calc(var(--notch) + 0.5px)) right / 51% 100% no-repeat;
+}
+
+.eticket-title {
+  text-align: center;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 2px dashed #f0b3a5;
+}
+
+.eticket-title h2 {
+  margin: 0;
+  font-size: 1.7rem;
+  font-weight: 500;
+}
+
+.eticket-title p {
+  margin: 0.15rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+.eticket-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem 1.25rem;
+  margin: 0;
+}
+
+.eticket-details dt {
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+}
+
+.eticket-details dd {
+  margin: 0.2rem 0 0;
+  font-weight: 600;
+}
+
+.eticket-details .right {
+  text-align: right;
+}
+
+.eticket-barcode {
+  height: 72px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--ink) 0 3px,
+    transparent 3px 5px,
+    var(--ink) 5px 6px,
+    transparent 6px 9px,
+    var(--ink) 9px 13px,
+    transparent 13px 15px,
+    var(--ink) 15px 16px,
+    transparent 16px 20px
+  );
+}
+
+.ticket-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem;
+  margin-top: 1.25rem;
+}
+
+.ticket-actions button {
+  padding: 0.95rem 1rem;
+}
+
+.ticket-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+  transform: none;
+}
+
+.ticket-actions .ghost-btn {
+  background: var(--glass);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--glass-border);
+}
+
+.center {
+  text-align: center;
+}
