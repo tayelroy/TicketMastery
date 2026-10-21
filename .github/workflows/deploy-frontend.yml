@@ -1,0 +1,64 @@
+name: Deploy Frontend to AWS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    name: Build and Deploy Frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-southeast-1
+
+      - name: Upload frontend to S3
+        env:
+          BUCKET: ${{ vars.FRONTEND_BUCKET_NAME }}
+        run: |
+          # Upload other files with short caching
+          aws s3 sync frontend/dist/ "s3://$BUCKET/" \
+            --exclude "index.html" \
+            --exclude "assets/*" \
+            --cache-control "public,max-age=300"
+
+          # Upload Vite hashed assets with long caching
+          aws s3 sync frontend/dist/assets/ "s3://$BUCKET/assets/" \
+            --cache-control "public,max-age=31536000,immutable"
+
+          # Always upload the HTML entry point last
+          aws s3 cp frontend/dist/index.html "s3://$BUCKET/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate" \
+            --content-type "text/html"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths "/*"

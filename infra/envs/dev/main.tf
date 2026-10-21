@@ -107,3 +107,33 @@ check "task_egress" {
     error_message = "tasks_in_public_subnets = false (private subnets, no public IP) needs enable_nat_gateway = true, or both enable_vpc_endpoints and enable_gateway_endpoints; otherwise ECS tasks cannot pull images, ship logs or read secrets and will fail to start."
   }
 }
+
+# Edge infrastructure - Cody
+# S3, CloudFront, and AWS WAF
+module "edge" {
+  source = "../../modules/edge"
+
+  name = local.name
+
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  tags = {
+    Owner = "cody"
+  }
+}
+
+# GitHub Actions deployment permissions - Cody
+module "github_deploy" {
+  source = "../../modules/github-deploy"
+
+  name = local.name
+
+  github_repository = "tayelroy/TicketMastery"
+
+  frontend_bucket_arn = module.edge.frontend_bucket_arn
+
+  cloudfront_distribution_arn = module.edge.cloudfront_distribution_arn
+}
