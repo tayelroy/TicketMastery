@@ -12,3 +12,19 @@ provider "aws" {
     }
   }
 }
+
+# Additional AWS provider - N. Virginia
+# Required for CloudFront WAF
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Project     = "TicketMastery"
+      Owner       = "cody"
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    }
+  }
+}
