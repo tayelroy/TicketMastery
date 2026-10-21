@@ -12,6 +12,11 @@ function handler(event) {
         return request;
     }
 
+    // Never rewrite Vite static assets.
+    if (uri.indexOf('/assets/') === 0) {
+        return request;
+    }
+
     // Only rewrite browser navigation requests.
     var accept = request.headers.accept
         ? request.headers.accept.value

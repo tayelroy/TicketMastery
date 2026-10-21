@@ -11,3 +11,9 @@ variable "tags" {
     Owner = "cody"
   }
 }
+
+variable "api_gateway_domain" {
+  description = "API Gateway hostname, without https:// or a path"
+  type        = string
+  default     = ""
+}

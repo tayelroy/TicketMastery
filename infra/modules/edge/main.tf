@@ -55,6 +55,43 @@ resource "aws_cloudfront_distribution" "frontend" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
+  dynamic "origin" {
+    for_each = var.api_gateway_domain != "" ? [1] : []
+
+    content {
+      domain_name = var.api_gateway_domain
+      origin_id   = "api-gateway"
+
+      custom_origin_config {
+        http_port              = 80
+        https_port             = 443
+        origin_protocol_policy = "https-only"
+        origin_ssl_protocols   = ["TLSv1.2"]
+      }
+    }
+  }
+
+  dynamic "ordered_cache_behavior" {
+    for_each = var.api_gateway_domain != "" ? ["/api/*", "/health"] : []
+
+    content {
+      path_pattern           = ordered_cache_behavior.value
+      target_origin_id       = "api-gateway"
+      viewer_protocol_policy = "redirect-to-https"
+
+      allowed_methods = [
+        "GET", "HEAD", "OPTIONS",
+        "PUT", "POST", "PATCH", "DELETE"
+      ]
+
+      cached_methods = ["GET", "HEAD"]
+
+      cache_policy_id = "4135ea2d-6df8-44a1-9df3-4b5a84be39ad"
+
+      origin_request_policy_id = "216adef6-5c7f-47e4-b989-5492eafa07d3"
+    }
+  }
+
   default_cache_behavior {
     target_origin_id       = "frontend-s3"
     viewer_protocol_policy = "redirect-to-https"
@@ -62,7 +99,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     allowed_methods = ["GET", "HEAD"]
     cached_methods  = ["GET", "HEAD"]
 
-    cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id = aws_cloudfront_cache_policy.frontend.id
 
     function_association {
       event_type   = "viewer-request"
@@ -183,4 +220,29 @@ resource "aws_wafv2_web_acl" "frontend" {
   }
 
   tags = var.tags
+}
+
+resource "aws_cloudfront_cache_policy" "frontend" {
+  name        = "${var.name}-frontend-cache"
+  comment     = "Cache policy for TicketMastery React frontend"
+  default_ttl = 86400
+  max_ttl     = 31536000
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+
+    headers_config {
+      header_behavior = "none"
+    }
+
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
 }
