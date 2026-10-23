@@ -137,3 +137,12 @@ module "github_deploy" {
 
   cloudfront_distribution_arn = module.edge.cloudfront_distribution_arn
 }
+
+# SQS FIFO join-queue + DLQ, DynamoDB live-queue, queue-manager Lambda.
+# The Lambda runs in the private subnets and reaches DynamoDB via the gateway endpoint.
+module "waiting_room" {
+  source = "../../modules/waiting-room"
+
+  vpc_id             = module.network.vpc_id
+  private_subnet_ids = module.network.private_subnet_ids
+}
