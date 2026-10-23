@@ -21,6 +21,12 @@ alb_ingress_cidrs        = ["0.0.0.0/0"]
 rds_extra_ingress_sg_ids = [] # e.g. ["sg-0123456789abcdef0"] for a VPC Lambda
 certificate_arn          = "" # ACM ARN in ap-southeast-1 enables HTTPS + HTTP->HTTPS redirect
 
+# Auth + API Gateway (Andrew)
+alb_integration     = "vpc_link" # or "origin_header" (needs certificate_arn + alb_origin_domain)
+alb_internal        = false      # true = ALB only reachable through API Gateway's VPC link; then also set alb_ingress_cidrs = []
+alb_origin_domain   = ""         # origin_header only, e.g. "origin.example.com"
+waiting_room_public = false      # true = guests can join the waiting room without signing in
+
 # API service
 image_tag                     = "latest"
 container_port                = 3000
