@@ -4,10 +4,11 @@ locals {
 
 resource "aws_lb" "this" {
   name               = "${var.name}-alb"
-  internal           = false
+  internal           = var.alb_internal
   load_balancer_type = "application"
   security_groups    = [var.alb_sg_id]
-  subnets            = var.public_subnet_ids
+  # Internal (option B): only API Gateway's VPC link can reach it. Internet-facing: public subnets.
+  subnets = var.alb_internal ? var.private_subnet_ids : var.public_subnet_ids
 
   drop_invalid_header_fields = true
   enable_deletion_protection = false

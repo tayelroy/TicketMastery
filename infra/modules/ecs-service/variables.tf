@@ -181,6 +181,12 @@ variable "log_retention_days" {
 # ALB
 ################################################################################
 
+variable "alb_internal" {
+  description = "true = internal ALB in the private subnets, reachable only from inside the VPC (API Gateway VPC link). Changing it replaces the ALB (new DNS name and listener ARNs)."
+  type        = bool
+  default     = false
+}
+
 variable "certificate_arn" {
   description = "ACM certificate ARN (same region) for an HTTPS listener. Empty = HTTP only. When set, HTTP redirects to HTTPS."
   type        = string
