@@ -7,9 +7,9 @@ Terraform for the shared base: VPC, security groups, ECR, RDS PostgreSQL, and th
 ```
 infra/
 ├── envs/dev/            root module: wires the modules, owns state
-│   ├── versions.tf      terraform >= 1.6, aws ~> 5.0, random ~> 3.6
+│   ├── versions.tf      terraform >= 1.10, aws ~> 5.0, random ~> 3.6
 │   ├── providers.tf     region + default tags (no profile; use AWS_PROFILE)
-│   ├── backend.tf       local state + commented S3/DynamoDB backend
+│   ├── backend.tf       S3 remote state with native lockfile
 │   ├── main.tf          module wiring
 │   ├── variables.tf / outputs.tf / terraform.tfvars.example
 └── modules/
@@ -38,7 +38,7 @@ terraform init
 terraform plan
 ```
 
-Only one person applies `dev` while state is local. Switch to the S3 backend in `backend.tf` once the bucket and lock table exist.
+State is shared in S3 (`ticketmastery-tfstate-000246635159`, key `envs/dev/terraform.tfstate`) and locked with an S3 lockfile, so only one apply runs at a time. You need credentials for account 000246635159 to run any Terraform command.
 
 ### Implementation mode vs HA target, and cost toggles
 
@@ -110,7 +110,7 @@ The task definition uses `<ecr_repository_url>:<image_tag>`. You can push a new 
 
 If your stack lives in its own root module, read this one's outputs instead of hardcoding IDs.
 
-- Remote state (after the S3 backend is enabled):
+- Remote state:
 
   ```hcl
   data "terraform_remote_state" "base" {
