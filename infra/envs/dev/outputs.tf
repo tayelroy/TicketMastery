@@ -128,3 +128,22 @@ output "db_secret_arn" {
   description = "Secrets Manager ARN of the RDS-managed master credentials (JSON keys username, password). Grant secretsmanager:GetSecretValue on this ARN; never copy the value into code."
   value       = module.rds.master_user_secret_arn
 }
+
+################################################################################
+# Waiting room
+################################################################################
+
+output "join_queue_url" {
+  description = "SQS FIFO join-queue URL; pass to the API as JOIN_QUEUE_URL."
+  value       = module.waiting_room.join_queue_url
+}
+
+output "join_queue_arn" {
+  description = "SQS FIFO join-queue ARN (grant the API sqs:SendMessage on it)."
+  value       = module.waiting_room.join_queue_arn
+}
+
+output "live_queue_table_name" {
+  description = "DynamoDB live-queue table name; the API reads queue positions from it."
+  value       = module.waiting_room.live_queue_table_name
+}
