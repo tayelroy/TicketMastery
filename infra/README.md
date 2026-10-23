@@ -75,6 +75,19 @@ The task definition uses `<ecr_repository_url>:<image_tag>`. You can push a new 
 
 `auth_mode` defaults to `dev-header` for development. It **must** be switched to `cognito` once the Cognito/API Gateway authorizer is live.
 
+### Deploying the frontend and clearing the CloudFront cache
+
+The `Deploy Frontend to AWS` workflow (manual, `main` only) builds `frontend/`, syncs it to the frontend bucket, then clears the CloudFront cache with a `/*` invalidation so users get the new `index.html` right away. Hashed files under `assets/` are cached for a year and never need clearing. The workflow reads three repo variables, which must be set again after every fresh apply because the IDs change:
+
+```bash
+cd infra/envs/dev
+gh variable set AWS_DEPLOY_ROLE_ARN        --body "$(terraform output -raw github_deploy_role_arn)"
+gh variable set FRONTEND_BUCKET_NAME       --body "$(terraform output -raw frontend_bucket_name)"
+gh variable set CLOUDFRONT_DISTRIBUTION_ID --body "$(terraform output -raw cloudfront_distribution_id)"
+```
+
+To clear the cache by hand: `aws cloudfront create-invalidation --distribution-id "$(terraform output -raw cloudfront_distribution_id)" --paths "/*"`.
+
 ## Adding your own module (e.g. waiting room)
 
 1. Create `infra/modules/waiting-room/` with `versions.tf`, `variables.tf`, `main.tf`, `outputs.tf`, following the existing modules. Take shared values as variables; don't look them up with data sources.
@@ -132,4 +145,4 @@ If your stack lives in its own root module, read this one's outputs instead of h
   terraform -chdir=infra/envs/dev output -raw alb_dns_name
   ```
 
-Shared outputs: `vpc_id`, `vpc_cidr`, `public_subnet_ids`, `private_subnet_ids`, `task_subnet_ids`, `alb_sg_id`, `ecs_sg_id`, `rds_sg_id`, `alb_dns_name`, `alb_arn`, `alb_listener_arn` (HTTPS if a certificate is set, otherwise HTTP), `ecs_cluster_name`, `ecs_service_name`, `ecr_repository_url`, `task_role_arn`, `task_role_name`, `log_group_name`, `db_endpoint`, `db_address`, `db_port`, `db_name`, `db_availability_zone`, `db_secret_arn`.
+Shared outputs: `vpc_id`, `vpc_cidr`, `public_subnet_ids`, `private_subnet_ids`, `task_subnet_ids`, `alb_sg_id`, `ecs_sg_id`, `rds_sg_id`, `alb_dns_name`, `alb_arn`, `alb_listener_arn` (HTTPS if a certificate is set, otherwise HTTP), `ecs_cluster_name`, `ecs_service_name`, `ecr_repository_url`, `task_role_arn`, `task_role_name`, `log_group_name`, `db_endpoint`, `db_address`, `db_port`, `db_name`, `db_availability_zone`, `db_secret_arn`, `frontend_bucket_name`, `cloudfront_distribution_id`, `cloudfront_domain_name`, `github_deploy_role_arn`.
