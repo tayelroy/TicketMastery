@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { pool, withTransaction } from '../../db/pool';
+import { pool, type Queryable, withTransaction } from '../../db/pool';
 import {
   confirmHold as confirmSeats,
   HOLD_MINUTES,
@@ -9,19 +9,28 @@ import {
 } from '../../db/seat-holds';
 import { HttpError } from '../../http/errors';
 import { isAdmitted } from './admission';
-import { type OrderConfirmedEvent, publishOrderConfirmed } from './events';
+import { type OrderConfirmedEvent, orderEvents } from './events';
 import * as repo from './repository';
-import type { ConcertSummaryRow, OrderRow, OrderSeatRow, SeatForHoldRow } from './repository';
+import type { ConcertStatus, ConcertSummaryRow, OrderRow, OrderSeatRow, SeatForHoldRow } from './repository';
 import type { ConfirmHoldInput, CreateHoldInput } from './schemas';
 
-/** Flat booking fee per seat (the proposal mockup: 2 seats -> $8.00). */
+/**
+ * Flat booking fee per seat (the proposal mockup: 2 seats -> $8.00), in the order's minor units. Every ticket
+ * type is SGD today; a concert priced in another currency would need its own fee.
+ */
 export const BOOKING_FEE_CENTS_PER_SEAT = 400;
 
 /**
  * Concert statuses that can sell, provided the sale window is open. Nothing moves a concert to 'on_sale'
  * yet (UC5 publishes to 'scheduled'), so a published concert inside its window counts as on sale.
  */
-const SELLABLE_STATUSES = new Set(['scheduled', 'on_sale']);
+/**
+ * A repeat confirm re-publishes OrderConfirmed only once the order has been confirmed this long without SNS
+ * accepting it. Shorter, and a double-click would publish again while the first request is still publishing.
+ */
+export const REPUBLISH_AFTER_SECONDS = 60;
+
+const SELLABLE_STATUSES: ReadonlySet<ConcertStatus> = new Set<ConcertStatus>(['scheduled', 'on_sale']);
 
 function toHoldDto(order: OrderRow, seats: OrderSeatRow[]) {
   return {
@@ -82,6 +91,11 @@ export async function createHold(fanId: string, input: CreateHoldInput) {
           saleStartsAt: concert.sale_starts_at,
           saleEndsAt: concert.sale_ends_at,
         });
+      }
+
+      // A fan who walked away from an earlier hold: close that order and free whatever it still holds.
+      for (const staleHoldId of await repo.expireStalePendingOrders(tx, fanId, input.concertId)) {
+        await releaseSeats(tx, { holdId: staleHoldId, fanId });
       }
 
       const existing = await repo.findActivePendingOrder(tx, fanId, input.concertId);
@@ -148,7 +162,7 @@ function toOrderConfirmedEvent(
   return {
     type: 'OrderConfirmed',
     version: 1,
-    occurredAt: new Date().toISOString(),
+    occurredAt: (order.confirmed_at ?? new Date()).toISOString(),
     orderId: order.id,
     holdId: order.hold_id,
     fanId: order.fan_id,
@@ -180,7 +194,7 @@ function toOrderConfirmedEvent(
  */
 export async function releaseHold(fanId: string, holdId: string) {
   return withTransaction(async (tx) => {
-    const order = await repo.lockOrderByHold(tx, fanId, holdId);
+    const order = await repo.lockOrderByHold(tx, fanId, holdId, REPUBLISH_AFTER_SECONDS);
     if (!order) {
       throw new HttpError(404, 'not_found', 'Hold not found');
     }
@@ -200,12 +214,21 @@ export async function releaseHold(fanId: string, holdId: string) {
 const holdExpiredError = () =>
   new HttpError(409, 'hold_expired', 'Your 10-minute hold has run out; please pick your seats again');
 
+/** Builds OrderConfirmed from the database (used for the first publish and for re-publishing). */
+async function buildOrderConfirmedEvent(tx: Queryable, order: OrderRow, seats: OrderSeatRow[]) {
+  return toOrderConfirmedEvent(order, seats, await repo.findConcertSummary(tx, order.concert_id));
+}
+
 /**
  * Simulated payment. On success the seats are sold and the order confirmed in one transaction, then
  * OrderConfirmed is published to SNS (the e-ticket pipeline); checkout never waits for the email.
  * On failure, or when the hold has run out or the concert was cancelled, the seats are released and the
- * order closed, then the fan gets an error. Confirming an already confirmed order returns it again
- * (double-click safe) without publishing a second event.
+ * order closed, then the fan gets an error.
+ *
+ * Confirming an already confirmed order returns it again (double-click safe). If its OrderConfirmed never
+ * reached SNS (publish failed, or the task died right after COMMIT) and REPUBLISH_AFTER_SECONDS have passed,
+ * it is published again, so a paid order can always get its e-ticket. published_at records the first
+ * successful publish.
  */
 export async function confirmHold(fanId: string, holdId: string, input: ConfirmHoldInput) {
   let outcome:
@@ -214,16 +237,23 @@ export async function confirmHold(fanId: string, holdId: string, input: ConfirmH
 
   try {
     outcome = await withTransaction(async (tx) => {
-      const order = await repo.lockOrderByHold(tx, fanId, holdId);
+      const order = await repo.lockOrderByHold(tx, fanId, holdId, REPUBLISH_AFTER_SECONDS);
       if (!order) {
         throw new HttpError(404, 'not_found', 'Hold not found');
       }
       if (order.status === 'confirmed') {
-        return { kind: 'confirmed' as const, dto: toHoldDto(order, await repo.findOrderSeats(tx, order.id)) };
+        const seats = await repo.findOrderSeats(tx, order.id);
+        return {
+          kind: 'confirmed' as const,
+          dto: toHoldDto(order, seats),
+          event: order.republish_due ? await buildOrderConfirmedEvent(tx, order, seats) : undefined,
+        };
       }
-      if (order.status !== 'pending') {
-        const message = `This hold has been ${order.status}; please pick your seats again`;
-        throw new HttpError(409, `hold_${order.status}`, message);
+      if (order.status === 'cancelled') {
+        throw new HttpError(409, 'hold_cancelled', 'This hold has been cancelled; please pick your seats again');
+      }
+      if (order.status === 'expired') {
+        throw holdExpiredError();
       }
 
       // Every refusal below closes the order and frees its seats; the transaction then commits that change
@@ -251,11 +281,10 @@ export async function confirmHold(fanId: string, holdId: string, input: ConfirmH
       const seats = await repo.findOrderSeats(tx, order.id);
       await confirmSeats(tx, { holdId, fanId, orderId: order.id, expectedSeats: seats.length });
       const confirmed = await repo.setOrderStatus(tx, order.id, 'confirmed');
-      const summary = await repo.findConcertSummary(tx, order.concert_id);
       return {
         kind: 'confirmed' as const,
         dto: toHoldDto(confirmed, seats),
-        event: toOrderConfirmedEvent(confirmed, seats, summary),
+        event: await buildOrderConfirmedEvent(tx, confirmed, seats),
       };
     });
   } catch (err) {
@@ -269,8 +298,8 @@ export async function confirmHold(fanId: string, holdId: string, input: ConfirmH
   if (outcome.kind === 'refused') {
     throw outcome.error;
   }
-  if (outcome.event) {
-    await publishOrderConfirmed(outcome.event);
+  if (outcome.event && (await orderEvents.publishOrderConfirmed(outcome.event))) {
+    await repo.markPublished(pool, outcome.event.orderId);
   }
   return outcome.dto;
 }

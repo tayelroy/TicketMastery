@@ -35,13 +35,15 @@ export interface OrderConfirmedEvent {
 }
 
 /**
- * Publishes after the order has committed. A failure is logged, not thrown: the fan has paid and the seats are
- * sold, so the checkout must still succeed. The log line carries the full event so it can be re-sent by hand.
+ * Publishes after the order has committed and returns true once SNS has accepted the event. A failure is
+ * logged and returns false instead of throwing: the fan has paid and the seats are sold, so checkout must
+ * still succeed. The order then keeps published_at NULL, and confirming it again re-publishes (service.ts).
+ * SNS -> SQS delivery is at-least-once, so ticket-fn must ignore repeats of the same orderId.
  */
-export async function publishOrderConfirmed(event: OrderConfirmedEvent): Promise<void> {
+async function publishOrderConfirmed(event: OrderConfirmedEvent): Promise<boolean> {
   if (!sns) {
     logger.info({ event }, 'ORDER_EVENTS_TOPIC_ARN not set; OrderConfirmed not published');
-    return;
+    return false;
   }
   try {
     const result = await sns.send(
@@ -53,7 +55,12 @@ export async function publishOrderConfirmed(event: OrderConfirmedEvent): Promise
       }),
     );
     logger.info({ orderId: event.orderId, messageId: result.MessageId }, 'OrderConfirmed published');
+    return true;
   } catch (err) {
-    logger.error({ err, event }, 'failed to publish OrderConfirmed; e-ticket will not be sent automatically');
+    logger.error({ err, orderId: event.orderId }, 'failed to publish OrderConfirmed; re-sent on the next confirm');
+    return false;
   }
 }
+
+/** Called through this object (not imported directly) so tests can replace the publisher. */
+export const orderEvents = { publishOrderConfirmed };

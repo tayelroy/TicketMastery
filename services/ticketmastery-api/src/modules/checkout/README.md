@@ -62,7 +62,8 @@ same body as above. Releasing an order that is already cancelled/expired returns
 
 The body is optional. On success the seats become `sold` and the order `confirmed` in one transaction (`200`,
 same body as above, `status: "confirmed"`), then `OrderConfirmed` is published to SNS `order-events`. Confirming an
-already confirmed order returns it again without a second event (double-click safe).
+already confirmed order returns it again (double-click safe), and re-publishes `OrderConfirmed` if it never reached
+SNS (`orders.published_at IS NULL`) and the order was confirmed over a minute ago (`REPUBLISH_AFTER_SECONDS`).
 
 | Status | `error.code` | When |
 |---|---|---|
@@ -71,25 +72,32 @@ already confirmed order returns it again without a second event (double-click sa
 | 409 | `hold_expired` | the 10 minutes ran out; seats released, order `expired` |
 | 409 | `concert_cancelled` | the organiser cancelled the concert; seats released, order `cancelled` |
 | 409 | `hold_cancelled` | the hold was already released or its payment failed |
+| 409 | `hold_expired` | (also) the order was already closed as expired |
 
 ### `OrderConfirmed` event (`events.ts`)
 
 Published after the order commits, with message attribute `eventType = OrderConfirmed`. It carries everything
 `ticket-fn` needs (order, fan id, concert title/artist/venue/start, seats, prices), so the Lambda never reads RDS.
-If publishing fails, checkout still succeeds and the full event is logged at `error` level so it can be re-sent.
-With `ORDER_EVENTS_TOPIC_ARN` unset (local dev) the event is only logged.
+`orders.published_at` is set once SNS accepts it. If publishing fails (or the task dies right after the order
+commits), checkout still succeeds and `published_at` stays `NULL`; confirming again after a minute re-publishes, and
+`WHERE status = 'confirmed' AND published_at IS NULL` finds any order still waiting. Delivery is at-least-once,
+so `ticket-fn` must ignore repeats of the same `orderId`. With `ORDER_EVENTS_TOPIC_ARN` unset (local dev) the
+event is only logged and `published_at` stays `NULL`.
 
 ## Data (`migrations/0002_uc4_orders.sql`)
 
 - `orders`: one per checkout attempt (`hold_id` unique). `pending` → `confirmed` / `cancelled` / `expired`.
-  Stores `subtotal_cents`, `booking_fee_cents` and `total_cents` separately.
+  Stores `subtotal_cents`, `booking_fee_cents` and `total_cents` separately, and `published_at` (above).
 - `order_items`: one row per seat with the ticket type and price at hold time.
 - `seats.order_id` now references `orders`, and a sold seat must have an `order_id`.
 
 ## Rules
 
-- Booking fee: flat `BOOKING_FEE_CENTS_PER_SEAT` (S$4.00) per seat, from the proposal mockup.
+- Booking fee: flat `BOOKING_FEE_CENTS_PER_SEAT` (S$4.00) per seat, from the proposal mockup. Assumes SGD.
 - One active (unexpired, pending) hold per fan per concert, so one fan can't hoard seats across many holds.
+- A fan's pending orders whose hold has run out are closed as `expired` when they release/confirm them or start
+  a new hold. A fan who never comes back keeps a `pending` order with `expires_at` in the past until a sweeper
+  exists (open question in `docs/architecture.md`); treat that as expired when displaying it.
 - Sellable when the concert is `scheduled` or `on_sale` **and** inside its sale window. Nothing sets
   `on_sale` yet, so a published concert counts as on sale during its window. Cancelled concerts never sell.
 - Seat status changes only go through `src/db/seat-holds.ts`.

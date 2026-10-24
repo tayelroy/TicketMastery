@@ -2,9 +2,12 @@ import type { Queryable } from '../../db/pool';
 
 export type OrderStatus = 'pending' | 'confirmed' | 'cancelled' | 'expired';
 
+/** Mirrors the concert_status enum in 0001 (kept here: modules don't import from each other). */
+export type ConcertStatus = 'draft' | 'scheduled' | 'on_sale' | 'sold_out' | 'cancelled' | 'completed';
+
 export interface CheckoutConcertRow {
   id: string;
-  status: string;
+  status: ConcertStatus;
   sale_starts_at: Date;
   sale_ends_at: Date;
   /** Evaluated by Postgres so it uses the same clock (and transaction time) as the hold UPDATE. */
@@ -47,11 +50,14 @@ export interface OrderRow {
   booking_fee_cents: number;
   total_cents: number;
   expires_at: Date;
+  confirmed_at: Date | null;
+  /** When SNS accepted OrderConfirmed; null until then. */
+  published_at: Date | null;
   created_at: Date;
 }
 
 const ORDER_COLUMNS = `id, fan_id, concert_id, hold_id, status, currency, subtotal_cents, booking_fee_cents,
-  total_cents, expires_at, created_at`;
+  total_cents, expires_at, confirmed_at, published_at, created_at`;
 
 /**
  * Serialises hold requests from the same fan for the same concert until the transaction ends, so the
@@ -75,6 +81,20 @@ export async function findConcertForCheckout(db: Queryable, concertId: string) {
     [concertId],
   );
   return rows[0];
+}
+
+/**
+ * Closes the fan's pending orders for this concert whose hold has run out, so a fan who walked away and comes
+ * back doesn't keep a stale 'pending' order. Returns their hold ids so the caller can release the seats.
+ */
+export async function expireStalePendingOrders(db: Queryable, fanId: string, concertId: string) {
+  const { rows } = await db.query<{ hold_id: string }>(
+    `UPDATE orders SET status = 'expired'
+      WHERE fan_id = $1 AND concert_id = $2 AND status = 'pending' AND expires_at <= now()
+      RETURNING hold_id`,
+    [fanId, concertId],
+  );
+  return rows.map((r) => r.hold_id);
 }
 
 /** The fan's unexpired pending order for this concert, if any. */
@@ -149,14 +169,18 @@ export async function insertPendingOrder(
 /**
  * The fan's order for this hold, locked FOR UPDATE so a release and a confirm of the same hold (double-click,
  * two tabs) run one after the other. `hold_expired` uses the transaction's now(), like the seat statements.
+ * `republish_due`: confirmed more than `republishAfterSeconds` ago and OrderConfirmed still not accepted by SNS,
+ * so the original attempt has failed rather than still being in flight.
  */
-export async function lockOrderByHold(db: Queryable, fanId: string, holdId: string) {
-  const { rows } = await db.query<OrderRow & { hold_expired: boolean }>(
-    `SELECT ${ORDER_COLUMNS}, expires_at <= now() AS hold_expired
+export async function lockOrderByHold(db: Queryable, fanId: string, holdId: string, republishAfterSeconds: number) {
+  const { rows } = await db.query<OrderRow & { hold_expired: boolean; republish_due: boolean }>(
+    `SELECT ${ORDER_COLUMNS}, expires_at <= now() AS hold_expired,
+            (status = 'confirmed' AND published_at IS NULL
+              AND confirmed_at < now() - make_interval(secs => $3)) AS republish_due
        FROM orders
       WHERE hold_id = $1 AND fan_id = $2
       FOR UPDATE`,
-    [holdId, fanId],
+    [holdId, fanId, republishAfterSeconds],
   );
   return rows[0];
 }
@@ -173,6 +197,14 @@ export async function setOrderStatus(db: Queryable, orderId: string, status: Exc
     [orderId, status],
   );
   return rows[0]!;
+}
+
+/** Records that SNS accepted OrderConfirmed for this order (first success wins). */
+export async function markPublished(db: Queryable, orderId: string) {
+  await db.query(
+    `UPDATE orders SET published_at = now() WHERE id = $1 AND status = 'confirmed' AND published_at IS NULL`,
+    [orderId],
+  );
 }
 
 /** The order's seats with the price fixed at hold time (order_items), for responses and the event. */
