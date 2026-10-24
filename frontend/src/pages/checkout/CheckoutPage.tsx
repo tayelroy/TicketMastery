@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, ApiError } from '../../api/client';
 import { formatConcertDate, formatMoney, type Hold, type SeatMap } from './types';
@@ -14,7 +14,6 @@ const ERROR_TEXT: Record<string, string> = {
   not_on_sale: 'Tickets for this concert are not on sale right now.',
   not_admitted: 'You need to go through the waiting room first.',
   too_many_seats: 'That is more seats of one ticket type than a single order allows.',
-  hold_expired: 'Your 10-minute reservation ran out and the seats were released. Please select again.',
   hold_cancelled: 'That reservation was already cancelled. Please select your seats again.',
   payment_failed: 'Payment was declined and your seats were released. Please select again.',
   concert_cancelled: 'This concert has been cancelled.',
@@ -58,6 +57,7 @@ export function CheckoutPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [simulateFailure, setSimulateFailure] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -99,6 +99,21 @@ export function CheckoutPage() {
   const remainingMs = hold ? new Date(hold.expiresAt).getTime() - now : 0;
   const holdRanOut = hold !== null && remainingMs <= 0;
 
+  // The reservation ran out on this page: release it (the order is closed as 'expired' and the seats freed
+  // straight away), show the seat map again and tell the fan why with the timeout popup.
+  useEffect(() => {
+    if (!holdRanOut || !hold) return;
+    setTimedOut(true);
+    void (async () => {
+      try {
+        await api(`/api/checkout/holds/${hold.holdId}`, { method: 'DELETE' });
+      } catch {
+        // Already closed on the server; the reload below shows the current state either way.
+      }
+      await load();
+    })();
+  }, [holdRanOut, hold, load]);
+
   /** Runs an API call with the busy flag, turning API errors into a notice (and a fresh seat map if needed). */
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -106,7 +121,10 @@ export function CheckoutPage() {
     try {
       await action();
     } catch (err) {
-      if (err instanceof ApiError) {
+      if (err instanceof ApiError && err.code === 'hold_expired') {
+        setTimedOut(true);
+        await load();
+      } else if (err instanceof ApiError) {
         setNotice(ERROR_TEXT[err.code] ?? err.message);
         if (RELOAD_AFTER.has(err.code)) await load();
       } else {
@@ -209,6 +227,7 @@ export function CheckoutPage() {
 
   return (
     <section className="checkout-page">
+      <TimeoutDialog open={timedOut} onClose={() => setTimedOut(false)} />
       <Steps current={hold ? 1 : 0} />
       <header className="checkout-head">
         <p className="eyebrow">{concert.artist}</p>
@@ -362,6 +381,33 @@ export function CheckoutPage() {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Centred popup shown when the 10-minute reservation runs out. Uses the native <dialog> as a modal: it dims
+ * the page, keeps keyboard focus inside, and stays until the fan closes it (button or Esc).
+ */
+function TimeoutDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = ref.current;
+    if (open && dialog && !dialog.open) dialog.showModal();
+    if (!open && dialog?.open) dialog.close();
+  }, [open]);
+
+  return (
+    <dialog ref={ref} className="checkout-dialog" aria-labelledby="timeout-title" onClose={onClose}>
+      <h2 id="timeout-title">Reservation timed out</h2>
+      <p>
+        Your seats were reserved for 10 minutes, and the time ran out before payment was completed. They've been
+        released so other fans can book them.
+      </p>
+      <p>Please select your seats again to continue.</p>
+      <button type="button" onClick={onClose}>
+        Select seats again
+      </button>
+    </dialog>
   );
 }
 

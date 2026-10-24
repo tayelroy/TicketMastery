@@ -17,7 +17,7 @@
 
 ## Files
 
-- `CheckoutPage.tsx`: the page in three steps: Select seats → Checkout (10-minute reservation timer, itemised order summary, simulated payment; "Change seats" releases them) → Confirmation. The API calls the reservation a "hold".
+- `CheckoutPage.tsx`: the page in three steps: Select seats → Checkout (10-minute reservation timer, itemised order summary, simulated payment; "Change seats" releases them) → Confirmation. The API calls the reservation a "hold". When the 10 minutes run out, the page releases the reservation, shows the seat map again and opens a "Reservation timed out" popup that the fan closes themselves (`TimeoutDialog`).
 - `types.ts`: API response types and money/date formatting
 - `checkout.css`: styles (ticket type colours `tt-0`…`tt-3`, seat states)
 
@@ -32,6 +32,12 @@ docker compose exec postgres psql -U tm -d ticketmastery -c "UPDATE concerts SET
 ```
 
 Then sign in with any user id and open `/concerts/<id>/checkout`.
+
+To see the timeout popup without waiting 10 minutes, reserve seats, shorten the reservation, then refresh the page:
+
+```bash
+docker compose exec postgres psql -U tm -d ticketmastery -c "UPDATE orders SET expires_at = now() + interval '20 seconds' WHERE status = 'pending'" -c "UPDATE seats SET hold_expires_at = now() + interval '20 seconds' WHERE status = 'held'"
+```
 
 ## Notes
 
