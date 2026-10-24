@@ -2,11 +2,18 @@
 
 **Owner:** Shi Hui
 **Mounted at:** `/api/checkout` (registered in `src/modules/index.ts`)
-**Status:** hold, release and confirm implemented. `OrderConfirmed` is published to SNS when `ORDER_EVENTS_TOPIC_ARN` is set.
+**Status:** seat map, hold, release and confirm implemented. `OrderConfirmed` is published to SNS when `ORDER_EVENTS_TOPIC_ARN` is set.
 
 ## Endpoints
 
 All routes need a signed-in fan (any user; no group). `401` when anonymous.
+
+### `GET /api/checkout/concerts/:concertId/seats` — seat map for the checkout page
+
+The concert (with `onSale`), its ticket types, every seat grouped by section and row with `status`
+`available` / `held` (by someone else) / `yours` / `sold`, `bookingFeeCentsPerSeat`, and the fan's `activeHold`
+(same body as the hold response below, or `null`) so a page refresh keeps the countdown. `404` for a missing or
+draft concert. A stand-in until UC1's `/api/concerts` has a seat map; it reads UC5 tables through UC4's own SQL.
 
 ### `POST /api/checkout/holds` — hold seats for 10 minutes
 
