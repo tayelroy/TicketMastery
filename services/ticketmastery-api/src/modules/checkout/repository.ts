@@ -118,7 +118,7 @@ export async function insertPendingOrder(
   const { rows } = await db.query<OrderRow>(
     `INSERT INTO orders (fan_id, concert_id, hold_id, currency, subtotal_cents, booking_fee_cents, total_cents,
                          expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $5 + $6, now() + make_interval(mins => $7))
+     VALUES ($1, $2, $3, $4, $5::int, $6::int, $5::int + $6::int, now() + make_interval(mins => $7))
      RETURNING ${ORDER_COLUMNS}`,
     [
       order.fanId,
