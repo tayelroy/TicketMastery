@@ -1,11 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { pool, withTransaction } from '../../db/pool';
-import { HOLD_MINUTES, holdSeats, SeatsUnavailableError } from '../../db/seat-holds';
+import {
+  confirmHold as confirmSeats,
+  HOLD_MINUTES,
+  holdSeats,
+  releaseHold as releaseSeats,
+  SeatsUnavailableError,
+} from '../../db/seat-holds';
 import { HttpError } from '../../http/errors';
 import { isAdmitted } from './admission';
+import { type OrderConfirmedEvent, publishOrderConfirmed } from './events';
 import * as repo from './repository';
-import type { OrderRow, SeatForHoldRow } from './repository';
-import type { CreateHoldInput } from './schemas';
+import type { ConcertSummaryRow, OrderRow, OrderSeatRow, SeatForHoldRow } from './repository';
+import type { ConfirmHoldInput, CreateHoldInput } from './schemas';
 
 /** Flat booking fee per seat (the proposal mockup: 2 seats -> $8.00). */
 export const BOOKING_FEE_CENTS_PER_SEAT = 400;
@@ -16,7 +23,7 @@ export const BOOKING_FEE_CENTS_PER_SEAT = 400;
  */
 const SELLABLE_STATUSES = new Set(['scheduled', 'on_sale']);
 
-function toHoldDto(order: OrderRow, seats: SeatForHoldRow[]) {
+function toHoldDto(order: OrderRow, seats: OrderSeatRow[]) {
   return {
     holdId: order.hold_id,
     orderId: order.id,
@@ -131,4 +138,139 @@ export async function createHold(fanId: string, input: CreateHoldInput) {
     }
     throw err;
   }
+}
+
+function toOrderConfirmedEvent(
+  order: OrderRow,
+  seats: OrderSeatRow[],
+  concert: ConcertSummaryRow,
+): OrderConfirmedEvent {
+  return {
+    type: 'OrderConfirmed',
+    version: 1,
+    occurredAt: new Date().toISOString(),
+    orderId: order.id,
+    holdId: order.hold_id,
+    fanId: order.fan_id,
+    concert: {
+      id: concert.id,
+      title: concert.title,
+      artist: concert.artist,
+      venueName: concert.venue_name,
+      startsAt: concert.starts_at.toISOString(),
+    },
+    currency: order.currency,
+    seats: seats.map((s) => ({
+      seatId: s.id,
+      section: s.section_name,
+      row: s.row_label,
+      seatNumber: s.seat_number,
+      ticketType: s.ticket_type_name,
+      priceCents: s.price_cents,
+    })),
+    subtotalCents: order.subtotal_cents,
+    bookingFeeCents: order.booking_fee_cents,
+    totalCents: order.total_cents,
+  };
+}
+
+/**
+ * Lets the fan give the seats back. The order becomes 'cancelled' (or 'expired' if the 10 minutes were already
+ * up). Releasing an order that is already cancelled/expired returns it unchanged, so a retry is harmless.
+ */
+export async function releaseHold(fanId: string, holdId: string) {
+  return withTransaction(async (tx) => {
+    const order = await repo.lockOrderByHold(tx, fanId, holdId);
+    if (!order) {
+      throw new HttpError(404, 'not_found', 'Hold not found');
+    }
+    if (order.status === 'confirmed') {
+      throw new HttpError(409, 'order_confirmed', 'This order has been paid for; its seats can no longer be released');
+    }
+    if (order.status === 'pending') {
+      // Only touches seats still held under this hold id; seats another fan has since reclaimed are left alone.
+      await releaseSeats(tx, { holdId, fanId });
+      const updated = await repo.setOrderStatus(tx, order.id, order.hold_expired ? 'expired' : 'cancelled');
+      return toHoldDto(updated, await repo.findOrderSeats(tx, order.id));
+    }
+    return toHoldDto(order, await repo.findOrderSeats(tx, order.id));
+  });
+}
+
+const holdExpiredError = () =>
+  new HttpError(409, 'hold_expired', 'Your 10-minute hold has run out; please pick your seats again');
+
+/**
+ * Simulated payment. On success the seats are sold and the order confirmed in one transaction, then
+ * OrderConfirmed is published to SNS (the e-ticket pipeline); checkout never waits for the email.
+ * On failure, or when the hold has run out or the concert was cancelled, the seats are released and the
+ * order closed, then the fan gets an error. Confirming an already confirmed order returns it again
+ * (double-click safe) without publishing a second event.
+ */
+export async function confirmHold(fanId: string, holdId: string, input: ConfirmHoldInput) {
+  let outcome:
+    | { kind: 'confirmed'; dto: ReturnType<typeof toHoldDto>; event?: OrderConfirmedEvent }
+    | { kind: 'refused'; error: HttpError };
+
+  try {
+    outcome = await withTransaction(async (tx) => {
+      const order = await repo.lockOrderByHold(tx, fanId, holdId);
+      if (!order) {
+        throw new HttpError(404, 'not_found', 'Hold not found');
+      }
+      if (order.status === 'confirmed') {
+        return { kind: 'confirmed' as const, dto: toHoldDto(order, await repo.findOrderSeats(tx, order.id)) };
+      }
+      if (order.status !== 'pending') {
+        const message = `This hold has been ${order.status}; please pick your seats again`;
+        throw new HttpError(409, `hold_${order.status}`, message);
+      }
+
+      // Every refusal below closes the order and frees its seats; the transaction then commits that change
+      // and the error is thrown after the commit.
+      const close = async (status: 'cancelled' | 'expired', error: HttpError) => {
+        await releaseSeats(tx, { holdId, fanId });
+        await repo.setOrderStatus(tx, order.id, status);
+        return { kind: 'refused' as const, error };
+      };
+
+      if (order.hold_expired) {
+        return close('expired', holdExpiredError());
+      }
+      const concert = await repo.findConcertForCheckout(tx, order.concert_id);
+      if (concert?.status === 'cancelled') {
+        return close('cancelled', new HttpError(409, 'concert_cancelled', 'This concert has been cancelled'));
+      }
+      if (input.simulatePaymentFailure) {
+        return close(
+          'cancelled',
+          new HttpError(402, 'payment_failed', 'Payment was declined; your seats have been released'),
+        );
+      }
+
+      const seats = await repo.findOrderSeats(tx, order.id);
+      await confirmSeats(tx, { holdId, fanId, orderId: order.id, expectedSeats: seats.length });
+      const confirmed = await repo.setOrderStatus(tx, order.id, 'confirmed');
+      const summary = await repo.findConcertSummary(tx, order.concert_id);
+      return {
+        kind: 'confirmed' as const,
+        dto: toHoldDto(confirmed, seats),
+        event: toOrderConfirmedEvent(confirmed, seats, summary),
+      };
+    });
+  } catch (err) {
+    if (err instanceof SeatsUnavailableError) {
+      // The hold ran out between the check and the update (another fan reclaimed a seat). Nothing was sold.
+      throw holdExpiredError();
+    }
+    throw err;
+  }
+
+  if (outcome.kind === 'refused') {
+    throw outcome.error;
+  }
+  if (outcome.event) {
+    await publishOrderConfirmed(outcome.event);
+  }
+  return outcome.dto;
 }

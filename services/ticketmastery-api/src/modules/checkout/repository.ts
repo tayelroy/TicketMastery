@@ -11,16 +11,29 @@ export interface CheckoutConcertRow {
   sale_open: boolean;
 }
 
-export interface SeatForHoldRow {
+/** A seat as shown on the checkout page and in the OrderConfirmed event. */
+export interface OrderSeatRow {
   id: string;
   ticket_type_id: string;
   ticket_type_name: string;
   price_cents: number;
-  currency: string;
-  max_per_order: number;
   section_name: string;
   row_label: string;
   seat_number: string;
+}
+
+export interface SeatForHoldRow extends OrderSeatRow {
+  currency: string;
+  max_per_order: number;
+}
+
+/** What the e-ticket needs to say about the concert. */
+export interface ConcertSummaryRow {
+  id: string;
+  title: string;
+  artist: string;
+  venue_name: string;
+  starts_at: Date;
 }
 
 export interface OrderRow {
@@ -129,6 +142,60 @@ export async function insertPendingOrder(
       order.bookingFeeCents,
       order.holdMinutes,
     ],
+  );
+  return rows[0]!;
+}
+
+/**
+ * The fan's order for this hold, locked FOR UPDATE so a release and a confirm of the same hold (double-click,
+ * two tabs) run one after the other. `hold_expired` uses the transaction's now(), like the seat statements.
+ */
+export async function lockOrderByHold(db: Queryable, fanId: string, holdId: string) {
+  const { rows } = await db.query<OrderRow & { hold_expired: boolean }>(
+    `SELECT ${ORDER_COLUMNS}, expires_at <= now() AS hold_expired
+       FROM orders
+      WHERE hold_id = $1 AND fan_id = $2
+      FOR UPDATE`,
+    [holdId, fanId],
+  );
+  return rows[0];
+}
+
+/** Moves a pending order to its final status, stamping confirmed_at / cancelled_at to match. */
+export async function setOrderStatus(db: Queryable, orderId: string, status: Exclude<OrderStatus, 'pending'>) {
+  const { rows } = await db.query<OrderRow>(
+    `UPDATE orders
+        SET status = $2::order_status,
+            confirmed_at = CASE WHEN $2::order_status = 'confirmed' THEN now() END,
+            cancelled_at = CASE WHEN $2::order_status = 'cancelled' THEN now() END
+      WHERE id = $1 AND status = 'pending'
+      RETURNING ${ORDER_COLUMNS}`,
+    [orderId, status],
+  );
+  return rows[0]!;
+}
+
+/** The order's seats with the price fixed at hold time (order_items), for responses and the event. */
+export async function findOrderSeats(db: Queryable, orderId: string) {
+  const { rows } = await db.query<OrderSeatRow>(
+    `SELECT s.id, oi.ticket_type_id, tt.name AS ticket_type_name, oi.price_cents,
+            sec.name AS section_name, r.label AS row_label, s.seat_number
+       FROM order_items oi
+       JOIN seats s         ON s.id = oi.seat_id
+       JOIN ticket_types tt ON tt.id = oi.ticket_type_id
+       JOIN sections sec    ON sec.id = s.section_id
+       JOIN rows r          ON r.id = s.row_id
+      WHERE oi.order_id = $1
+      ORDER BY sec.sort_order, r.sort_order, s.seat_number`,
+    [orderId],
+  );
+  return rows;
+}
+
+export async function findConcertSummary(db: Queryable, concertId: string) {
+  const { rows } = await db.query<ConcertSummaryRow>(
+    `SELECT id, title, artist, venue_name, starts_at FROM concerts WHERE id = $1`,
+    [concertId],
   );
   return rows[0]!;
 }

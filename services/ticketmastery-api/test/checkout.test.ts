@@ -1,5 +1,5 @@
 /**
- * Integration tests for UC4 checkout holds (POST /api/checkout/holds via the service).
+ * Integration tests for UC4 checkout (hold, release and confirm, via the service).
  * Needs a real Postgres, like seat-inventory.test.ts: skipped when DB_HOST is unset, and everything runs in
  * a throwaway schema that is dropped at the end.
  */
@@ -169,6 +169,111 @@ describe('checkout holds (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
       checkout.createHold('fan-1', { concertId, seatIds: [seat.A1!, seat.A2!, seat.A3!] }),
       httpError(400, 'too_many_seats'),
     );
+  });
+
+  /** Status of the order and of each of its seats, straight from the tables. */
+  async function orderState(holdId: string) {
+    const order = await db.query<{ id: string; status: string; confirmed_at: Date | null; cancelled_at: Date | null }>(
+      'SELECT id, status, confirmed_at, cancelled_at FROM orders WHERE hold_id = $1',
+      [holdId],
+    );
+    const seats = await db.query<{ status: string; order_id: string | null; hold_id: string | null }>(
+      `SELECT s.status, s.order_id, s.hold_id
+         FROM order_items oi JOIN seats s ON s.id = oi.seat_id
+        WHERE oi.order_id = $1`,
+      [order.rows[0]!.id],
+    );
+    return { order: order.rows[0]!, seats: seats.rows };
+  }
+
+  async function expireHold(holdId: string) {
+    await db.query(`UPDATE orders SET expires_at = now() - interval '1 second' WHERE hold_id = $1`, [holdId]);
+    await db.query(
+      `UPDATE seats SET held_at = now() - interval '11 minutes', hold_expires_at = now() - interval '1 second'
+        WHERE hold_id = $1`,
+      [holdId],
+    );
+  }
+
+  test('release frees the seats and cancels the order; releasing again changes nothing', async () => {
+    const { concertId, seat } = await createOnSaleConcert();
+    const hold = await checkout.createHold('fan-1', { concertId, seatIds: [seat.B1!, seat.B2!] });
+
+    await assert.rejects(checkout.releaseHold('fan-2', hold.holdId), httpError(404, 'not_found'));
+
+    const released = await checkout.releaseHold('fan-1', hold.holdId);
+    assert.equal(released.status, 'cancelled');
+    const state = await orderState(hold.holdId);
+    assert.ok(state.order.cancelled_at);
+    assert.ok(state.seats.every((s) => s.status === 'available' && s.hold_id === null));
+
+    assert.equal((await checkout.releaseHold('fan-1', hold.holdId)).status, 'cancelled');
+    // The seats are free for someone else straight away.
+    await checkout.createHold('fan-2', { concertId, seatIds: [seat.B1!] });
+  });
+
+  test('confirm sells the seats and confirms the order; confirming again returns the same order', async () => {
+    const { concertId, seat } = await createOnSaleConcert();
+    const hold = await checkout.createHold('fan-1', { concertId, seatIds: [seat.A1!, seat.B1!] });
+
+    const order = await checkout.confirmHold('fan-1', hold.holdId, { simulatePaymentFailure: false });
+    assert.equal(order.status, 'confirmed');
+    assert.equal(order.totalCents, hold.totalCents);
+    assert.deepEqual(order.seats, hold.seats);
+
+    const state = await orderState(hold.holdId);
+    assert.ok(state.order.confirmed_at);
+    assert.equal(state.seats.length, 2);
+    assert.ok(state.seats.every((s) => s.status === 'sold' && s.order_id === order.orderId));
+
+    const again = await checkout.confirmHold('fan-1', hold.holdId, { simulatePaymentFailure: false });
+    assert.equal(again.orderId, order.orderId);
+    await assert.rejects(checkout.releaseHold('fan-1', hold.holdId), httpError(409, 'order_confirmed'));
+  });
+
+  test('a failed payment releases the seats and cancels the order', async () => {
+    const { concertId, seat } = await createOnSaleConcert();
+    const hold = await checkout.createHold('fan-1', { concertId, seatIds: [seat.B1!] });
+
+    await assert.rejects(
+      checkout.confirmHold('fan-1', hold.holdId, { simulatePaymentFailure: true }),
+      httpError(402, 'payment_failed'),
+    );
+    const state = await orderState(hold.holdId);
+    assert.equal(state.order.status, 'cancelled');
+    assert.ok(state.seats.every((s) => s.status === 'available'));
+    await assert.rejects(
+      checkout.confirmHold('fan-1', hold.holdId, { simulatePaymentFailure: false }),
+      httpError(409, 'hold_cancelled'),
+    );
+  });
+
+  test('confirm after the hold ran out: 409, order expired, seats free', async () => {
+    const { concertId, seat } = await createOnSaleConcert();
+    const hold = await checkout.createHold('fan-1', { concertId, seatIds: [seat.B1!] });
+    await expireHold(hold.holdId);
+
+    await assert.rejects(
+      checkout.confirmHold('fan-1', hold.holdId, { simulatePaymentFailure: false }),
+      httpError(409, 'hold_expired'),
+    );
+    const state = await orderState(hold.holdId);
+    assert.equal(state.order.status, 'expired');
+    assert.ok(state.seats.every((s) => s.status === 'available'));
+  });
+
+  test('confirm after the concert was cancelled: 409, nothing sold', async () => {
+    const { concertId, seat } = await createOnSaleConcert();
+    const hold = await checkout.createHold('fan-1', { concertId, seatIds: [seat.B1!] });
+    await organiser.cancelConcert(ORGANISER, concertId, 'Venue unavailable');
+
+    await assert.rejects(
+      checkout.confirmHold('fan-1', hold.holdId, { simulatePaymentFailure: false }),
+      httpError(409, 'concert_cancelled'),
+    );
+    const state = await orderState(hold.holdId);
+    assert.equal(state.order.status, 'cancelled');
+    assert.ok(state.seats.every((s) => s.status === 'available'));
   });
 
   test('a sold seat must name an existing order', async () => {

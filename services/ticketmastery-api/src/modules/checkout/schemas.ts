@@ -14,3 +14,13 @@ export const createHoldBody = z
   })
   .strict();
 export type CreateHoldInput = z.infer<typeof createHoldBody>;
+
+export const holdIdParams = z.object({ holdId: z.uuid() });
+
+/** Payment is simulated. `simulatePaymentFailure` lets the demo show the failed-payment path. */
+export const confirmHoldBody = z
+  .object({
+    simulatePaymentFailure: z.boolean().default(false),
+  })
+  .strict();
+export type ConfirmHoldInput = z.infer<typeof confirmHoldBody>;

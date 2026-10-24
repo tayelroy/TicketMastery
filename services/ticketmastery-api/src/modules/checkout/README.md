@@ -2,7 +2,7 @@
 
 **Owner:** Shi Hui
 **Mounted at:** `/api/checkout` (registered in `src/modules/index.ts`)
-**Status:** `POST /holds` implemented; release and confirm still to come.
+**Status:** hold, release and confirm implemented. `OrderConfirmed` is published to SNS when `ORDER_EVENTS_TOPIC_ARN` is set.
 
 ## Endpoints
 
@@ -44,10 +44,40 @@ curl -s -X POST localhost:3000/api/checkout/holds \
   -d '{"concertId": "<uuid>", "seatIds": ["<seat uuid>"]}'
 ```
 
-### Planned
+### `DELETE /api/checkout/holds/:holdId` — release a hold
 
-- `DELETE /api/checkout/holds/:holdId` — release a hold (order → `cancelled`)
-- `POST /api/checkout/holds/:holdId/confirm` — simulated payment, mark seats sold, publish OrderConfirmed to SNS `order-events`
+Frees the seats and closes the order: `cancelled`, or `expired` if the 10 minutes were already up. `200` with the
+same body as above. Releasing an order that is already cancelled/expired returns it unchanged.
+
+| Status | `error.code` | When |
+|---|---|---|
+| 404 | `not_found` | no such hold for this fan |
+| 409 | `order_confirmed` | already paid for |
+
+### `POST /api/checkout/holds/:holdId/confirm` — simulated payment
+
+```json
+{ "simulatePaymentFailure": false }
+```
+
+The body is optional. On success the seats become `sold` and the order `confirmed` in one transaction (`200`,
+same body as above, `status: "confirmed"`), then `OrderConfirmed` is published to SNS `order-events`. Confirming an
+already confirmed order returns it again without a second event (double-click safe).
+
+| Status | `error.code` | When |
+|---|---|---|
+| 402 | `payment_failed` | `simulatePaymentFailure: true`; seats released, order `cancelled` |
+| 404 | `not_found` | no such hold for this fan |
+| 409 | `hold_expired` | the 10 minutes ran out; seats released, order `expired` |
+| 409 | `concert_cancelled` | the organiser cancelled the concert; seats released, order `cancelled` |
+| 409 | `hold_cancelled` | the hold was already released or its payment failed |
+
+### `OrderConfirmed` event (`events.ts`)
+
+Published after the order commits, with message attribute `eventType = OrderConfirmed`. It carries everything
+`ticket-fn` needs (order, fan id, concert title/artist/venue/start, seats, prices), so the Lambda never reads RDS.
+If publishing fails, checkout still succeeds and the full event is logged at `error` level so it can be re-sent.
+With `ORDER_EVENTS_TOPIC_ARN` unset (local dev) the event is only logged.
 
 ## Data (`migrations/0002_uc4_orders.sql`)
 
@@ -69,4 +99,4 @@ curl -s -X POST localhost:3000/api/checkout/holds \
 ## Layout
 
 `router.ts` (HTTP + zod parsing), `service.ts` (rules, transactions), `repository.ts` (SQL), `schemas.ts`
-(zod), `admission.ts` (UC3 hook). Tests: `test/checkout.test.ts`.
+(zod), `admission.ts` (UC3 hook), `events.ts` (SNS publisher). Tests: `test/checkout.test.ts`.
