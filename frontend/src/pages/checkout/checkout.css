@@ -199,9 +199,10 @@
 
 /* ---------- Checkout step ---------- */
 
+/* Centred in the content column, like the confirmation card. */
 .checkout-step {
   max-width: 640px;
-  margin-top: 1.5rem;
+  margin: 1.5rem auto 0;
 }
 
 .checkout-step h2 {
@@ -294,6 +295,7 @@
 
 .checkout-done {
   max-width: 560px;
+  margin: 0 auto;
 }
 
 .checkout-done h1 {
