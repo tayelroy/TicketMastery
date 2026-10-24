@@ -15,6 +15,14 @@
 - `DELETE /api/checkout/holds/:holdId`: release a hold
 - `POST /api/checkout/holds/:holdId/confirm`: simulated payment (`simulatePaymentFailure` for the demo checkbox)
 
+## Keeping the seat map fresh
+
+- The map is fetched on arrival and again after anything that changes it (checkout, change seats, timeout, errors).
+- A seat click refreshes it first when it is more than 20 seconds old (`STALE_SEAT_MAP_MS`), keeping the fan's
+  selection. A seat taken meanwhile is not selected, and already-selected seats that were taken are removed, with a
+  message. Clicks within 20 seconds of the last refresh don't refresh again, so picking several seats stays quick.
+- Checkout still checks every seat on the server (`seats_unavailable`), which covers anything taken inside the window.
+
 ## Files
 
 - `CheckoutPage.tsx`: the page in three steps: Select seats → Checkout (10-minute reservation timer, itemised order summary, simulated payment; "Change seats" releases them) → Confirmation. The API calls the reservation a "hold". When the 10 minutes run out, the page releases the reservation, shows the seat map again and opens a "Reservation timed out" popup that the fan closes themselves (`TimeoutDialog`).

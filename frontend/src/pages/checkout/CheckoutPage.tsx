@@ -7,6 +7,15 @@ import './checkout.css';
 /** Same cap as the API (MAX_SEATS_PER_HOLD); the per-ticket-type limit comes from the seat map. */
 const MAX_SEATS_PER_HOLD = 20;
 
+/**
+ * A seat click refreshes the seat map first if it is older than this, so a fan who paused finds out a seat was
+ * taken when they pick it, not at Checkout. 20 s: a fan picking several seats clicks every few seconds, so a
+ * burst stays inside one window (no extra waiting), while anyone who stopped to browse or decide gets fresh
+ * data on their next click. It also caps refreshes at 3 a minute per fan during an on-sale spike. Checkout
+ * still has the final say: a seat taken within the window is caught there (seats_unavailable).
+ */
+const STALE_SEAT_MAP_MS = 20_000;
+
 /** Friendly text for the API's error codes; anything else shows the API's own message. */
 const ERROR_TEXT: Record<string, string> = {
   seats_unavailable: 'Some of those seats were just taken. The seat map has been refreshed, please select again.',
@@ -52,6 +61,10 @@ export function CheckoutPage() {
   const [map, setMap] = useState<SeatMap | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  // Mirrors `selected` so a click that waits for a refresh sees picks made meanwhile, not a stale closure.
+  const selectedRef = useRef<string[]>([]);
+  const lastLoadedAt = useRef(0);
+  const refreshing = useRef<Promise<SeatMap | null> | null>(null);
   const [hold, setHold] = useState<Hold | null>(null);
   const [confirmed, setConfirmed] = useState<Hold | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -59,21 +72,52 @@ export function CheckoutPage() {
   const [simulateFailure, setSimulateFailure] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
 
+  const updateSelected = (next: string[]) => {
+    selectedRef.current = next;
+    setSelected(next);
+  };
+
+  const seatMapPath = `/api/checkout/concerts/${encodeURIComponent(concertId)}/seats`;
+
   const load = useCallback(async () => {
     try {
-      const next = await api<SeatMap>(`/api/checkout/concerts/${encodeURIComponent(concertId)}/seats`);
+      const next = await api<SeatMap>(seatMapPath);
       setMap(next);
       setHold(next.activeHold);
+      selectedRef.current = [];
       setSelected([]);
+      lastLoadedAt.current = Date.now();
       setLoadError(null);
     } catch (err) {
       setLoadError(err instanceof ApiError && err.status === 404 ? 'Concert not found.' : 'Could not load the seats.');
     }
-  }, [concertId]);
+  }, [seatMapPath]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * Fetches the seat map again but keeps the fan's selection (unlike load). Concurrent calls share one request.
+   * Returns null if it fails; the current map stays and Checkout still checks the seats.
+   */
+  function refreshSeats(): Promise<SeatMap | null> {
+    refreshing.current ??= (async () => {
+      try {
+        const next = await api<SeatMap>(seatMapPath);
+        setMap(next);
+        lastLoadedAt.current = Date.now();
+        // Reserved in another tab meanwhile: go straight to that checkout.
+        if (next.activeHold) setHold(next.activeHold);
+        return next;
+      } catch {
+        return null;
+      } finally {
+        refreshing.current = null;
+      }
+    })();
+    return refreshing.current;
+  }
 
   /** Seat id -> what the summary needs to show about it. */
   const seatInfo = useMemo(() => {
@@ -135,23 +179,45 @@ export function CheckoutPage() {
     }
   }
 
-  function toggleSeat(seatId: string) {
+  async function toggleSeat(seatId: string) {
     setNotice(null);
-    if (selected.includes(seatId)) {
-      setSelected(selected.filter((id) => id !== seatId));
+    if (selectedRef.current.includes(seatId)) {
+      updateSelected(selectedRef.current.filter((id) => id !== seatId));
       return;
     }
+
+    if (refreshing.current || Date.now() - lastLoadedAt.current > STALE_SEAT_MAP_MS) {
+      const fresh = await refreshSeats();
+      if (fresh) {
+        const allSeats = fresh.sections.flatMap((sec) => sec.rows.flatMap((r) => r.seats));
+        const free = new Set(allSeats.filter((x) => x.status === 'available').map((x) => x.id));
+        const lost = selectedRef.current.filter((id) => !free.has(id));
+        if (lost.length > 0) updateSelected(selectedRef.current.filter((id) => free.has(id)));
+        const messages = [];
+        if (!free.has(seatId)) messages.push('That seat was just taken by someone else. Please choose another.');
+        if (lost.length > 0) {
+          messages.push(
+            `${lost.length} of your selected seat${lost.length === 1 ? ' was' : 's were'} just taken by someone else ` +
+              'and removed from your selection.',
+          );
+        }
+        if (messages.length > 0) setNotice(messages.join(' '));
+        if (!free.has(seatId)) return;
+      }
+    }
+
+    const current = selectedRef.current;
     const type = ticketTypes.get(seatInfo.get(seatId)?.ticketTypeId ?? '');
-    const sameType = selected.filter((id) => seatInfo.get(id)?.ticketTypeId === type?.id).length;
+    const sameType = current.filter((id) => seatInfo.get(id)?.ticketTypeId === type?.id).length;
     if (type && sameType >= type.maxPerOrder) {
       setNotice(`You can pick up to ${type.maxPerOrder} ${type.name} seats per order.`);
       return;
     }
-    if (selected.length >= MAX_SEATS_PER_HOLD) {
+    if (current.length >= MAX_SEATS_PER_HOLD) {
       setNotice(`You can pick up to ${MAX_SEATS_PER_HOLD} seats per order.`);
       return;
     }
-    setSelected([...selected, seatId]);
+    updateSelected([...current, seatId]);
   }
 
   const holdSeats = () =>
@@ -318,7 +384,7 @@ export function CheckoutPage() {
                           disabled={!picking || !free || busy}
                           aria-pressed={isSelected}
                           title={`${seatInfo.get(seat.id)?.label} · ${type?.name ?? ''} · ${seat.status}`}
-                          onClick={() => toggleSeat(seat.id)}
+                          onClick={() => void toggleSeat(seat.id)}
                         >
                           {seat.seatNumber}
                         </button>
