@@ -2,11 +2,11 @@
 
 **Owner:** Shi Hui
 **Calls:** `/api/checkout` (API module `services/ticketmastery-api/src/modules/checkout/`)
-**Status:** implemented (seat map, 10-minute hold with countdown, simulated payment, confirmation).
+**Status:** implemented (seat selection, checkout with a 10-minute reservation timer, simulated payment, confirmation).
 
 ## Routes
 
-- `/concerts/:concertId/checkout`: pick seats, hold, pay, confirm (signed in)
+- `/concerts/:concertId/checkout`: select seats, check out, pay, confirmation (signed in)
 
 ## API endpoints (details in the API module README)
 
@@ -17,7 +17,7 @@
 
 ## Files
 
-- `CheckoutPage.tsx`: the page (pick seats → hold → pay or release → confirmed)
+- `CheckoutPage.tsx`: the page in three steps: Select seats → Checkout (10-minute reservation timer, itemised order summary, simulated payment; "Change seats" releases them) → Confirmation. The API calls the reservation a "hold".
 - `types.ts`: API response types and money/date formatting
 - `checkout.css`: styles (ticket type colours `tt-0`…`tt-3`, seat states)
 

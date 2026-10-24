@@ -9,14 +9,14 @@ const MAX_SEATS_PER_HOLD = 20;
 
 /** Friendly text for the API's error codes; anything else shows the API's own message. */
 const ERROR_TEXT: Record<string, string> = {
-  seats_unavailable: 'Some of those seats were just taken. The seat map has been refreshed, please pick again.',
-  active_hold_exists: 'You already have seats on hold for this concert.',
+  seats_unavailable: 'Some of those seats were just taken. The seat map has been refreshed, please select again.',
+  active_hold_exists: 'You already have seats reserved for this concert.',
   not_on_sale: 'Tickets for this concert are not on sale right now.',
   not_admitted: 'You need to go through the waiting room first.',
   too_many_seats: 'That is more seats of one ticket type than a single order allows.',
-  hold_expired: 'Your 10-minute hold ran out and the seats were released. Please pick again.',
-  hold_cancelled: 'That hold was already released. Please pick again.',
-  payment_failed: 'Payment was declined and your seats were released. Please pick again.',
+  hold_expired: 'Your 10-minute reservation ran out and the seats were released. Please select again.',
+  hold_cancelled: 'That reservation was already cancelled. Please select your seats again.',
+  payment_failed: 'Payment was declined and your seats were released. Please select again.',
   concert_cancelled: 'This concert has been cancelled.',
   order_confirmed: 'This order is already paid for.',
 };
@@ -31,7 +31,7 @@ const RELOAD_AFTER = new Set([
   'concert_cancelled',
 ]);
 
-/** Re-renders every second while `active`, for the hold countdown. */
+/** Re-renders every second while `active`, for the reservation countdown. */
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -179,6 +179,7 @@ export function CheckoutPage() {
   if (confirmed) {
     return (
       <section className="checkout-page">
+        <Steps current={2} />
         <div className="card checkout-done">
           <p className="eyebrow">Order confirmed</p>
           <h1>You're going to {concert.title}!</h1>
@@ -204,11 +205,11 @@ export function CheckoutPage() {
 
   const priceOf = (seatId: string) => ticketTypes.get(seatInfo.get(seatId)?.ticketTypeId ?? '')?.priceCents ?? 0;
   const selectedTotal = selected.reduce((sum, id) => sum + priceOf(id), 0);
-  const selectedFee = selected.length * map.bookingFeeCentsPerSeat;
   const picking = hold === null && concert.onSale;
 
   return (
     <section className="checkout-page">
+      <Steps current={hold ? 1 : 0} />
       <header className="checkout-head">
         <p className="eyebrow">{concert.artist}</p>
         <h1>{concert.title}</h1>
@@ -228,121 +229,154 @@ export function CheckoutPage() {
         </p>
       )}
 
-      <div className="checkout-layout">
-        <div className="card seat-map">
-          <div className="stage">Stage</div>
-          {map.sections.map((section) => (
-            <div key={section.id} className="seat-section">
-              <h3>{section.name}</h3>
-              {section.rows.map((row) => (
-                <div key={row.id} className="seat-row">
-                  <span className="row-label">{row.label}</span>
-                  {row.seats.map((seat) => {
-                    const isSelected = selected.includes(seat.id);
-                    const type = ticketTypes.get(seat.ticketTypeId);
-                    const free = seat.status === 'available';
-                    return (
-                      <button
-                        key={seat.id}
-                        type="button"
-                        className={`seat tt-${type?.colour ?? 0} ${seat.status} ${isSelected ? 'selected' : ''}`}
-                        disabled={!picking || !free || busy}
-                        aria-pressed={isSelected}
-                        title={`${seatInfo.get(seat.id)?.label} · ${type?.name ?? ''} · ${seat.status}`}
-                        onClick={() => toggleSeat(seat.id)}
-                      >
-                        {seat.seatNumber}
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
+      {hold ? (
+        <div className="card checkout-step">
+          {holdRanOut ? (
+            <div className="checkout-timer expired">
+              <strong>Your reservation has expired</strong>
+              <span>The seats have been released. Please select your seats again.</span>
             </div>
-          ))}
-          <div className="seat-legend">
-            {map.ticketTypes.map((t, i) => (
-              <span key={t.id}>
-                <i className={`seat tt-${i % 4}`} /> {t.name} {formatMoney(t.priceCents, t.currency)}
-              </span>
-            ))}
-            <span>
-              <i className="seat yours" /> Your hold
-            </span>
-            <span>
-              <i className="seat held" /> Taken
-            </span>
-          </div>
-        </div>
+          ) : (
+            <div className="checkout-timer" aria-live="polite">
+              <span>Your seats are reserved for</span>
+              <strong>{formatCountdown(remainingMs)}</strong>
+              <span>Complete payment before the timer runs out.</span>
+            </div>
+          )}
 
-        <aside className="card checkout-summary">
-          {hold ? (
-            <>
-              <p className="eyebrow">Seats on hold</p>
-              {holdRanOut ? (
-                <p className="countdown expired">Hold expired</p>
-              ) : (
-                <p className="countdown" aria-live="polite">
-                  {formatCountdown(remainingMs)}
-                </p>
-              )}
-              <OrderLines order={hold} />
-              {holdRanOut ? (
-                <button type="button" onClick={() => void load()} disabled={busy}>
-                  Pick seats again
-                </button>
-              ) : (
-                <div className="stack">
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={simulateFailure}
-                      onChange={(e) => setSimulateFailure(e.target.checked)}
-                    />
-                    Simulate a failed payment (demo)
-                  </label>
-                  <button type="button" onClick={() => void pay()} disabled={busy}>
-                    Pay {formatMoney(hold.totalCents, hold.currency)}
-                  </button>
-                  <button type="button" className="btn ghost" onClick={() => void release()} disabled={busy}>
-                    Release seats
-                  </button>
-                </div>
-              )}
-            </>
+          <h2>Order summary</h2>
+          <OrderLines order={hold} />
+
+          {holdRanOut ? (
+            <div className="row">
+              <button type="button" onClick={() => void load()} disabled={busy}>
+                Select seats again
+              </button>
+            </div>
           ) : (
             <>
-              <p className="eyebrow">Your seats</p>
-              {selected.length === 0 ? (
-                <p className="muted small">Pick seats on the map. They'll be held for 10 minutes while you pay.</p>
-              ) : (
-                <ul className="order-lines">
-                  {selected.map((id) => {
-                    const type = ticketTypes.get(seatInfo.get(id)?.ticketTypeId ?? '');
-                    return (
-                      <li key={id}>
-                        <span>
-                          {seatInfo.get(id)?.label}
-                          <small>{type?.name}</small>
-                        </span>
-                        <span>{formatMoney(type?.priceCents ?? 0, currency)}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              <Totals subtotal={selectedTotal} fee={selectedFee} currency={currency} />
-              <button
-                type="button"
-                onClick={() => void holdSeats()}
-                disabled={!picking || busy || selected.length === 0}
-              >
-                Hold {selected.length || ''} seat{selected.length === 1 ? '' : 's'} for 10 minutes
-              </button>
+              <h2>Payment</h2>
+              <p className="muted small">Payment is simulated for this project, so no card details are needed.</p>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={simulateFailure}
+                  onChange={(e) => setSimulateFailure(e.target.checked)}
+                />
+                Simulate a declined payment (demo)
+              </label>
+              <div className="row">
+                <button type="button" onClick={() => void pay()} disabled={busy}>
+                  Pay {formatMoney(hold.totalCents, hold.currency)}
+                </button>
+                <button type="button" className="btn ghost" onClick={() => void release()} disabled={busy}>
+                  Change seats
+                </button>
+              </div>
+              <p className="muted small">Changing seats releases your reserved seats so others can book them.</p>
             </>
           )}
-        </aside>
-      </div>
+        </div>
+      ) : (
+        <div className="checkout-layout">
+          <div className="card seat-map">
+            <div className="stage">Stage</div>
+            {map.sections.map((section) => (
+              <div key={section.id} className="seat-section">
+                <h3>{section.name}</h3>
+                {section.rows.map((row) => (
+                  <div key={row.id} className="seat-row">
+                    <span className="row-label">{row.label}</span>
+                    {row.seats.map((seat) => {
+                      const isSelected = selected.includes(seat.id);
+                      const type = ticketTypes.get(seat.ticketTypeId);
+                      const free = seat.status === 'available';
+                      return (
+                        <button
+                          key={seat.id}
+                          type="button"
+                          className={`seat tt-${type?.colour ?? 0} ${seat.status} ${isSelected ? 'selected' : ''}`}
+                          disabled={!picking || !free || busy}
+                          aria-pressed={isSelected}
+                          title={`${seatInfo.get(seat.id)?.label} · ${type?.name ?? ''} · ${seat.status}`}
+                          onClick={() => toggleSeat(seat.id)}
+                        >
+                          {seat.seatNumber}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            ))}
+            <div className="seat-legend">
+              {map.ticketTypes.map((t, i) => (
+                <span key={t.id}>
+                  <i className={`seat tt-${i % 4}`} /> {t.name} {formatMoney(t.priceCents, t.currency)}
+                </span>
+              ))}
+              <span>
+                <i className="seat selected" /> Selected
+              </span>
+              <span>
+                <i className="seat held" /> Unavailable
+              </span>
+            </div>
+          </div>
+
+          <aside className="card checkout-summary">
+            <p className="eyebrow">Order summary</p>
+            {selected.length === 0 ? (
+              <p className="muted small">Select seats on the map.</p>
+            ) : (
+              <ul className="order-lines">
+                {selected.map((id) => {
+                  const type = ticketTypes.get(seatInfo.get(id)?.ticketTypeId ?? '');
+                  return (
+                    <li key={id}>
+                      <span>
+                        {seatInfo.get(id)?.label}
+                        <small>{type?.name}</small>
+                      </span>
+                      <span>{formatMoney(type?.priceCents ?? 0, currency)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <Totals
+              subtotal={selectedTotal}
+              feePerSeat={map.bookingFeeCentsPerSeat}
+              seats={selected.length}
+              currency={currency}
+            />
+            <button
+              type="button"
+              onClick={() => void holdSeats()}
+              disabled={!picking || busy || selected.length === 0}
+            >
+              Checkout
+            </button>
+            <p className="muted small">Your seats are reserved for 10 minutes while you pay.</p>
+          </aside>
+        </div>
+      )}
     </section>
+  );
+}
+
+const STEPS = ['Select seats', 'Checkout', 'Confirmation'];
+
+/** 1 Select seats → 2 Checkout → 3 Confirmation, with the current step highlighted. */
+function Steps({ current }: { current: number }) {
+  return (
+    <ol className="checkout-steps">
+      {STEPS.map((label, i) => (
+        <li key={label} className={i === current ? 'current' : i < current ? 'done' : ''}>
+          <span>{i + 1}</span> {label}
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -360,17 +394,30 @@ function OrderLines({ order }: { order: Hold }) {
           </li>
         ))}
       </ul>
-      <Totals subtotal={order.subtotalCents} fee={order.bookingFeeCents} currency={order.currency} />
+      <Totals
+        subtotal={order.subtotalCents}
+        feePerSeat={order.seats.length ? order.bookingFeeCents / order.seats.length : 0}
+        seats={order.seats.length}
+        currency={order.currency}
+      />
     </>
   );
 }
 
-function Totals({ subtotal, fee, currency }: { subtotal: number; fee: number; currency: string }) {
+/** Subtotal, the booking fee shown as "per seat × seats", and the total. */
+function Totals(props: { subtotal: number; feePerSeat: number; seats: number; currency: string }) {
+  const { subtotal, feePerSeat, seats, currency } = props;
+  const fee = feePerSeat * seats;
   return (
     <dl className="totals">
       <dt>Subtotal</dt>
       <dd>{formatMoney(subtotal, currency)}</dd>
-      <dt>Booking fee</dt>
+      <dt>
+        Booking fee{' '}
+        <small>
+          ({formatMoney(feePerSeat, currency)} × {seats})
+        </small>
+      </dt>
       <dd>{formatMoney(fee, currency)}</dd>
       <dt className="total">Total</dt>
       <dd className="total">{formatMoney(subtotal + fee, currency)}</dd>
