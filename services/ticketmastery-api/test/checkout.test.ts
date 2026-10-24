@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
 import type * as PoolModule from '../src/db/pool';
 import type * as ErrorsModule from '../src/http/errors';
+import type * as CheckoutEventsModule from '../src/modules/checkout/events';
 import type * as CheckoutServiceModule from '../src/modules/checkout/service';
 import type * as OrganiserServiceModule from '../src/modules/organiser/service';
 
@@ -19,6 +20,7 @@ describe('checkout holds (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
   let db: typeof PoolModule;
   let organiser: typeof OrganiserServiceModule;
   let checkout: typeof CheckoutServiceModule;
+  let events: typeof CheckoutEventsModule;
   let errors: typeof ErrorsModule;
 
   /** A concert with one GA row (S$100, max 4 per order) and one VIP row (S$250, max 2), sale open. */
@@ -75,6 +77,7 @@ describe('checkout holds (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
     await (await import('../src/db/migrate.js')).runMigrations();
     organiser = await import('../src/modules/organiser/service.js');
     checkout = await import('../src/modules/checkout/service.js');
+    events = await import('../src/modules/checkout/events.js');
     errors = await import('../src/http/errors.js');
   });
 
@@ -173,7 +176,12 @@ describe('checkout holds (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
 
   /** Status of the order and of each of its seats, straight from the tables. */
   async function orderState(holdId: string) {
-    const order = await db.query<{ id: string; status: string; confirmed_at: Date | null; cancelled_at: Date | null }>(
+    const order = await db.query<{
+      id: string;
+      status: string;
+      confirmed_at: Date | null;
+      cancelled_at: Date | null;
+    }>(
       'SELECT id, status, confirmed_at, cancelled_at FROM orders WHERE hold_id = $1',
       [holdId],
     );
@@ -274,6 +282,123 @@ describe('checkout holds (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
     const state = await orderState(hold.holdId);
     assert.equal(state.order.status, 'cancelled');
     assert.ok(state.seats.every((s) => s.status === 'available'));
+  });
+
+  test('a stale pending order is closed as expired when the fan holds again', async () => {
+    const { concertId, seat } = await createOnSaleConcert();
+    const first = await checkout.createHold('fan-1', { concertId, seatIds: [seat.B1!] });
+    await expireHold(first.holdId);
+
+    await checkout.createHold('fan-1', { concertId, seatIds: [seat.B2!] });
+    const state = await orderState(first.holdId);
+    assert.equal(state.order.status, 'expired');
+    assert.ok(state.seats.every((s) => s.status === 'available'));
+  });
+
+  test('parallel holds by the same fan: exactly one order', async () => {
+    const { concertId, seat } = await createOnSaleConcert();
+    const results = await Promise.allSettled(
+      [seat.B1!, seat.B2!, seat.B3!, seat.B4!, seat.B5!].map((id) =>
+        checkout.createHold('fan-1', { concertId, seatIds: [id] }),
+      ),
+    );
+    assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+    assert.ok(
+      results.every((r) => r.status === 'fulfilled' || httpError(409, 'active_hold_exists')(r.reason)),
+      'the others are refused as active_hold_exists',
+    );
+    const { rows } = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM orders WHERE fan_id = 'fan-1' AND concert_id = $1`,
+      [concertId],
+    );
+    assert.equal(rows[0]!.n, 1);
+  });
+
+  test('parallel confirms and a release on one hold: one consistent outcome, one event', async (t) => {
+    const published = t.mock.method(events.orderEvents, 'publishOrderConfirmed', async () => true);
+    const { concertId, seat } = await createOnSaleConcert();
+    const hold = await checkout.createHold('fan-1', { concertId, seatIds: [seat.B1!, seat.B2!] });
+
+    const confirm = () => checkout.confirmHold('fan-1', hold.holdId, { simulatePaymentFailure: false });
+    const [c1, c2, c3, release] = await Promise.allSettled([
+      confirm(),
+      confirm(),
+      confirm(),
+      checkout.releaseHold('fan-1', hold.holdId),
+    ]);
+    // The order lock serialises them, so whichever takes it first decides: never a mix of the two.
+    const state = await orderState(hold.holdId);
+    if (state.order.status === 'confirmed') {
+      assert.ok([c1, c2, c3].every((c) => c!.status === 'fulfilled'));
+      assert.ok(httpError(409, 'order_confirmed')((release as PromiseRejectedResult).reason));
+      assert.ok(state.seats.every((s) => s.status === 'sold'));
+      assert.equal(published.mock.callCount(), 1, 'a double-click publishes one event, not one per click');
+    } else {
+      assert.equal(state.order.status, 'cancelled');
+      assert.equal(release!.status, 'fulfilled');
+      assert.ok([c1, c2, c3].every((c) => c!.status === 'rejected' && httpError(409, 'hold_cancelled')(c.reason)));
+      assert.ok(state.seats.every((s) => s.status === 'available'));
+      assert.equal(published.mock.callCount(), 0);
+    }
+  });
+
+  test('OrderConfirmed carries the e-ticket details and sets published_at', async (t) => {
+    const published = t.mock.method(events.orderEvents, 'publishOrderConfirmed', async () => true);
+    const { concertId, seat } = await createOnSaleConcert();
+    const hold = await checkout.createHold('fan-1', { concertId, seatIds: [seat.A1!, seat.B1!] });
+    await checkout.confirmHold('fan-1', hold.holdId, { simulatePaymentFailure: false });
+
+    assert.equal(published.mock.callCount(), 1);
+    const event = published.mock.calls[0]!.arguments[0]!;
+    assert.equal(event.type, 'OrderConfirmed');
+    assert.equal(event.orderId, hold.orderId);
+    assert.equal(event.fanId, 'fan-1');
+    assert.equal(event.concert.id, concertId);
+    assert.equal(event.concert.venueName, 'Test Hall');
+    assert.deepEqual(event.seats.map((s) => `${s.row}${s.seatNumber}`), ['A1', 'B1']);
+    assert.equal(event.totalCents, hold.totalCents);
+
+    const { rows } = await db.query<{ published_at: Date | null }>(
+      'SELECT published_at FROM orders WHERE id = $1',
+      [hold.orderId],
+    );
+    assert.ok(rows[0]!.published_at);
+  });
+
+  test('a failed publish is retried by a later confirm, then never again', async (t) => {
+    const published = t.mock.method(events.orderEvents, 'publishOrderConfirmed', async () => false);
+    const { concertId, seat } = await createOnSaleConcert();
+    const hold = await checkout.createHold('fan-1', { concertId, seatIds: [seat.B1!] });
+    const confirm = () => checkout.confirmHold('fan-1', hold.holdId, { simulatePaymentFailure: false });
+
+    // SNS down: the fan still gets their confirmed order, but nothing is marked published.
+    assert.equal((await confirm()).status, 'confirmed');
+    const publishedAt = async () => {
+      const { rows } = await db.query<{ published_at: Date | null }>(
+        'SELECT published_at FROM orders WHERE id = $1',
+        [hold.orderId],
+      );
+      return rows[0]!.published_at;
+    };
+    assert.equal(await publishedAt(), null);
+
+    // Straight away (a double-click): the first attempt might still be in flight, so no second event.
+    published.mock.mockImplementation(async () => true);
+    await confirm();
+    assert.equal(published.mock.callCount(), 1);
+
+    // Once REPUBLISH_AFTER_SECONDS have passed, the next confirm sends it again.
+    await db.query(
+      `UPDATE orders SET confirmed_at = now() - make_interval(secs => $2 + 1) WHERE id = $1`,
+      [hold.orderId, checkout.REPUBLISH_AFTER_SECONDS],
+    );
+    await confirm();
+    assert.equal(published.mock.callCount(), 2);
+    assert.equal(published.mock.calls[1]!.arguments[0]!.orderId, hold.orderId);
+    assert.ok(await publishedAt());
+
+    await confirm();
+    assert.equal(published.mock.callCount(), 2, 'already published: no third event');
   });
 
   test('a sold seat must name an existing order', async () => {
