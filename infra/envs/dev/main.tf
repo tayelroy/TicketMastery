@@ -95,6 +95,11 @@ module "ecs_service" {
   enable_autoscaling       = var.enable_autoscaling
   autoscaling_min_capacity = var.autoscaling_min_capacity
   autoscaling_max_capacity = var.autoscaling_max_capacity
+
+  # Non-secret values from teammates' modules.
+  extra_environment = {
+    ORDER_EVENTS_TOPIC_ARN = module.messaging.order_events_topic_arn # UC4 checkout publishes OrderConfirmed
+  }
 }
 
 # Warning only (check blocks never fail the run). Tasks in public subnets use
@@ -145,4 +150,13 @@ module "waiting_room" {
 
   vpc_id             = module.network.vpc_id
   private_subnet_ids = module.network.private_subnet_ids
+}
+
+# E-ticket pipeline - Shi Hui
+# SNS order-events -> SQS ticket-queue (+ DLQ); the API may publish to the topic.
+module "messaging" {
+  source = "../../modules/messaging"
+
+  name               = local.name
+  api_task_role_name = module.ecs_service.task_role_name
 }
