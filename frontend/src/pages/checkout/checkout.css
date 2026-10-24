@@ -1,0 +1,234 @@
+/* UC4 checkout styles. Shared tokens (--glass, --ink, --coral, ...) come from src/app/styles.css. */
+
+.checkout-head h1 {
+  margin: 0 0 0.35rem;
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+}
+
+.checkout-head p {
+  margin: 0;
+}
+
+.checkout-notice {
+  margin: 1.25rem 0 0;
+  padding: 0.85rem 1.2rem;
+  border-radius: 20px;
+  font-size: 0.92rem;
+}
+
+.checkout-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 1.25rem;
+  align-items: start;
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 860px) {
+  .checkout-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- Seat map ---------- */
+
+.seat-map {
+  overflow-x: auto;
+}
+
+.stage {
+  margin: 0 auto 1.5rem;
+  max-width: 60%;
+  padding: 0.45rem;
+  border-radius: 0 0 40px 40px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}
+
+.seat-section h3 {
+  margin: 1rem 0 0.6rem;
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+.seat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.row-label {
+  flex: none;
+  width: 1.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Overrides the shared pill button. */
+.seat {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 10px 10px 6px 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  box-shadow: none;
+  color: var(--ink);
+  border: 2px solid transparent;
+}
+
+.seat:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+/* Ticket type colours (available seats). */
+.seat.tt-0 {
+  background: #ffffff;
+}
+.seat.tt-1 {
+  background: #ffd9cf;
+}
+.seat.tt-2 {
+  background: #cfeef0;
+}
+.seat.tt-3 {
+  background: #f3e7b5;
+}
+
+.seat.available:not(:disabled):hover {
+  border-color: var(--ink);
+}
+
+.seat.selected {
+  background: var(--coral);
+  color: #ffffff;
+  border-color: #ffffff;
+}
+
+.seat.yours {
+  background: var(--coral);
+  color: #ffffff;
+}
+
+.seat.held,
+.seat.sold {
+  background: rgba(255, 255, 255, 0.18);
+  color: transparent;
+}
+
+.seat:disabled {
+  cursor: default;
+}
+
+.seat-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.25rem;
+  margin-top: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.seat-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.seat-legend .seat {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 4px;
+}
+
+/* ---------- Summary ---------- */
+
+.checkout-summary {
+  position: sticky;
+  top: 6rem;
+}
+
+.checkout-summary > button {
+  width: 100%;
+  margin-top: 1rem;
+}
+
+.checkout-summary .stack button {
+  width: 100%;
+}
+
+.countdown {
+  margin: 0 0 0.5rem;
+  font-size: 2.6rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown.expired {
+  font-size: 1.6rem;
+  color: var(--bad);
+}
+
+.order-lines {
+  list-style: none;
+  margin: 0.75rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.order-lines li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.order-lines small {
+  display: block;
+  color: var(--muted);
+}
+
+.totals {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 1rem;
+  margin: 1rem 0 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--glass-border);
+  font-size: 0.92rem;
+}
+
+.totals dt,
+.totals dd {
+  margin: 0;
+}
+
+.totals dd {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.totals .total {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.checkout-done {
+  max-width: 560px;
+}
+
+.checkout-done h1 {
+  margin: 0 0 0.35rem;
+}
