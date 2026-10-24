@@ -23,7 +23,7 @@ certificate_arn          = "" # ACM ARN in ap-southeast-1 enables HTTPS + HTTP->
 
 # Auth + API Gateway (Andrew)
 alb_integration     = "vpc_link" # or "origin_header" (needs certificate_arn + alb_origin_domain)
-alb_internal        = false      # true = ALB only reachable through API Gateway's VPC link; then also set alb_ingress_cidrs = []
+alb_internal        = false      # set true with vpc_link (+ alb_ingress_cidrs = []); keep false for origin_header or base-stack-only testing
 alb_origin_domain   = ""         # origin_header only, e.g. "origin.example.com"
 waiting_room_public = false      # true = guests can join the waiting room without signing in
 

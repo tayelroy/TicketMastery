@@ -177,14 +177,15 @@ module "auth_apigw" {
   waiting_room_public = var.waiting_room_public
 }
 
-# Warning only. vpc_link must target the plain HTTP listener: with a certificate, :80 redirects to HTTPS and the VPC
-# link would get 301s. origin_header needs the HTTPS listener (certificate) and the ALB's own DNS name.
+# Warning only. vpc_link needs the internal ALB (its ENIs sit in private subnets with no NAT, so they can't reach an
+# internet-facing ALB's public IPs) and the plain HTTP listener: with a certificate, :80 redirects to HTTPS and the
+# VPC link would get 301s. origin_header needs a public ALB, the HTTPS listener (certificate) and its own DNS name.
 check "auth_apigw_alb_integration" {
   assert {
     condition = (
-      (var.alb_integration == "vpc_link" && var.certificate_arn == "") ||
-      (var.alb_integration == "origin_header" && var.certificate_arn != "" && var.alb_origin_domain != "")
+      (var.alb_integration == "vpc_link" && var.alb_internal && var.certificate_arn == "") ||
+      (var.alb_integration == "origin_header" && !var.alb_internal && var.certificate_arn != "" && var.alb_origin_domain != "")
     )
-    error_message = "alb_integration = vpc_link needs certificate_arn = \"\"; origin_header needs certificate_arn and alb_origin_domain."
+    error_message = "alb_integration = vpc_link needs alb_internal = true and certificate_arn = \"\"; origin_header needs alb_internal = false, certificate_arn and alb_origin_domain."
   }
 }
