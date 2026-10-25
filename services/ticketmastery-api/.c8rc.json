@@ -1,0 +1,8 @@
+{
+  "include": ["src/auth/index.ts", "src/config.ts"],
+  "exclude-after-remap": true,
+  "check-coverage": true,
+  "100": true,
+  "reporter": ["text", "html"],
+  "report-dir": "coverage"
+}
