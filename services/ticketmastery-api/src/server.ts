@@ -1,4 +1,5 @@
 import { createApp } from './app';
+import { hydrateAuth } from './auth';
 import { config, devAuthInProduction } from './config';
 import { runMigrations } from './db/migrate';
 import { pool } from './db/pool';
@@ -18,6 +19,10 @@ async function main() {
     const result = await runMigrations();
     logger.info(result, 'migrations complete');
   }
+
+  // AUTH_MODE=cognito: load the signing keys before taking traffic; if Cognito is unreachable (no egress), fail
+  // fast so ECS restarts the task instead of serving 401s. No-op in dev-header mode.
+  await hydrateAuth();
 
   const server = createApp().listen(config.PORT, () => {
     logger.info(

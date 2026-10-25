@@ -38,9 +38,15 @@ npm run dev                        # tsx watch, loads .env
 | `npm run migrate` / `npm run migrate:dev` | apply migrations (compiled / tsx + `.env`) |
 | `npm run seed` / `npm run seed:prod` | idempotent demo seed (tsx + `.env` / compiled) |
 | `npm run typecheck` | `tsc --noEmit` over `src/` and `test/` |
-| `npm test` | Postgres integration tests (see below) |
+| `npm test` | all tests; the Postgres ones skip without `DB_HOST` (see below) |
+| `npm run test:coverage` | same tests on the `tsc` build, with c8; fails below 100% for `src/auth` and `src/config.ts` |
 
 ### Tests
+
+Auth and config tests need no database or network: `test/auth-*.test.ts` sign tokens with a throwaway key and
+serve its JWKS from a fake endpoint (`test/helpers/cognito.ts`), `test/config.test.ts` covers the environment
+checks, and `test/server-startup.test.ts` starts the real server in a child process. `test:coverage` runs the
+compiled output (what ships in `dist/`) so c8 doesn't count tsx's helper code; its HTML report lands in `coverage/`.
 
 `test/seat-inventory.test.ts` checks the layout-lock triggers and the all-or-nothing seat hold (two
 concurrent holds on the same seats: exactly one wins; expired holds are reclaimable). It needs a real
@@ -118,7 +124,8 @@ Each module has a `README.md` with its planned endpoints.
 2. Wrap async handlers in `asyncHandler` (Express 4 does not catch rejected promises) and throw
    `HttpError(status, code, message)` for expected failures. Postgres constraint errors are mapped centrally
    in `src/http/errors.ts`.
-3. Protect routes with `authenticate` and, where needed, `requireGroup('<group>')` (`src/auth`).
+3. Protect routes with `authenticate` plus `requireUser` (any signed-in user) or `requireGroup('<group>')`
+   (`src/auth`). Read the caller from `req.user` (`sub`, `groups`), never from `x-dev-user-*` headers.
 4. New module: add `{ basePath, router, useCase, owner }` to `src/modules/index.ts`.
 5. Seat holds (UC4): use `src/db/seat-holds.ts`, not hand-written variants.
 
@@ -141,17 +148,21 @@ Validated with zod at startup (`src/config.ts`); invalid config exits with a lis
 | `DB_PORT` | `5432` | |
 | `DB_SSL` | `false` | `true` on RDS (TLS without CA verification; see `src/db/pool.ts` for the RDS CA bundle) |
 | `DB_POOL_MAX` | `10` | per task; keep `tasks x DB_POOL_MAX` under RDS `max_connections` |
-| `AUTH_MODE` | `dev-header` | `dev-header` or `cognito` (cognito returns 501 until implemented) |
+| `AUTH_MODE` | `dev-header` | `dev-header` (trust `x-dev-user-*`, local only) or `cognito` (verify Cognito access tokens) |
 | `ALLOW_DEV_AUTH` | `false` | must be `true` to run `dev-header` with `NODE_ENV=production`; logs a warning |
-| `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID` | unset | placeholders for Cognito verification |
+| `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID` | unset | required with `AUTH_MODE=cognito`; Terraform sets them from `module.auth_apigw` |
 | `RUN_MIGRATIONS_ON_START` | `false` | migrate (advisory-locked) before listening |
 
 ### AWS notes
 
-- The ECS task currently runs `AUTH_MODE=dev-header` with `ALLOW_DEV_AUTH=true` until Andrew's Cognito
-  integration lands. **In that mode anyone who can reach the API can act as any user or organiser** by
-  sending `x-dev-user-*` headers (API Gateway forwards them). Do not put real data behind it; switching to
-  `AUTH_MODE=cognito` is the fix.
+- **`AUTH_MODE=cognito`** (Terraform `auth_mode = "cognito"`, which also sets `ALLOW_DEV_AUTH=false`): API Gateway's
+  JWT authorizer checks tokens on protected routes, and the API checks them again with `aws-jwt-verify` (signature,
+  issuer, expiry, `token_use = access`, `client_id`). No `Authorization` header means anonymous, so `requireUser` /
+  `requireGroup` decide. A header that is present but invalid gets `401 invalid_token`. `x-dev-user-*` headers are
+  ignored. Start-up loads the pool's signing keys before listening and exits if Cognito is unreachable (the task
+  needs outbound HTTPS: a public IP in implementation mode, NAT in HA).
+- With `AUTH_MODE=dev-header` and `ALLOW_DEV_AUTH=true`, **anyone who can reach the API can act as any user or
+  organiser** by sending `x-dev-user-*` headers. Don't put real data behind it.
 - ALB idle timeout is 60s; the server's keep-alive timeout is 65s to avoid sporadic 502s.
 - SIGTERM (ECS stop) closes the HTTP server and the pool, exiting within 25s.
 - The Docker `HEALTHCHECK` only applies if the task definition defines `healthCheck`; the ALB uses `/health`.
