@@ -148,3 +148,51 @@ output "github_deploy_role_arn" {
   description = "IAM role GitHub Actions assumes to deploy the frontend; GitHub repo variable AWS_DEPLOY_ROLE_ARN."
   value       = module.github_deploy.github_deploy_role_arn
 }
+
+################################################################################
+# Waiting room
+################################################################################
+
+output "join_queue_url" {
+  description = "SQS FIFO join-queue URL; pass to the API as JOIN_QUEUE_URL."
+  value       = module.waiting_room.join_queue_url
+}
+
+output "join_queue_arn" {
+  description = "SQS FIFO join-queue ARN (grant the API sqs:SendMessage on it)."
+  value       = module.waiting_room.join_queue_arn
+}
+
+output "live_queue_table_name" {
+  description = "DynamoDB live-queue table name; the API reads queue positions from it."
+  value       = module.waiting_room.live_queue_table_name
+}
+
+################################################################################
+# Auth + API Gateway
+################################################################################
+
+output "cognito_user_pool_id" {
+  description = "Cognito user pool ID; GitHub repo variable COGNITO_USER_POOL_ID (frontend build)."
+  value       = module.auth_apigw.user_pool_id
+}
+
+output "cognito_user_pool_client_id" {
+  description = "Cognito browser app client ID; GitHub repo variable COGNITO_CLIENT_ID (frontend build)."
+  value       = module.auth_apigw.user_pool_client_id
+}
+
+output "cognito_issuer_url" {
+  description = "JWT issuer of the user pool."
+  value       = module.auth_apigw.issuer_url
+}
+
+output "api_endpoint" {
+  description = "API Gateway base URL; test with curl $(terraform output -raw api_endpoint)/health."
+  value       = module.auth_apigw.api_endpoint
+}
+
+output "api_access_log_group_name" {
+  description = "CloudWatch log group with API Gateway access logs."
+  value       = module.auth_apigw.access_log_group_name
+}

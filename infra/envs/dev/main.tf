@@ -91,6 +91,13 @@ module "ecs_service" {
   container_insights = var.container_insights
   log_retention_days = var.log_retention_days
   certificate_arn    = var.certificate_arn
+  alb_internal       = var.alb_internal
+
+  # Public identifiers for AUTH_MODE=cognito (not secrets). Teammates add their non-secret values here too.
+  extra_environment = {
+    COGNITO_USER_POOL_ID = module.auth_apigw.user_pool_id
+    COGNITO_CLIENT_ID    = module.auth_apigw.user_pool_client_id
+  }
 
   enable_autoscaling       = var.enable_autoscaling
   autoscaling_min_capacity = var.autoscaling_min_capacity
@@ -115,6 +122,9 @@ module "edge" {
 
   name = local.name
 
+  # CloudFront sends /api/* and /health to API Gateway.
+  api_gateway_domain = module.auth_apigw.api_domain
+
   providers = {
     aws           = aws
     aws.us_east_1 = aws.us_east_1
@@ -136,4 +146,46 @@ module "github_deploy" {
   frontend_bucket_arn = module.edge.frontend_bucket_arn
 
   cloudfront_distribution_arn = module.edge.cloudfront_distribution_arn
+}
+
+# SQS FIFO join-queue + DLQ, DynamoDB live-queue, queue-manager Lambda.
+# The Lambda runs in the private subnets and reaches DynamoDB via the gateway endpoint.
+module "waiting_room" {
+  source = "../../modules/waiting-room"
+
+  vpc_id             = module.network.vpc_id
+  private_subnet_ids = module.network.private_subnet_ids
+}
+
+# Auth (Cognito) + API Gateway - Andrew
+module "auth_apigw" {
+  source = "../../modules/auth-apigw"
+
+  name               = local.name
+  vpc_id             = module.network.vpc_id
+  private_subnet_ids = module.network.private_subnet_ids
+  alb_sg_id          = module.security.alb_sg_id
+
+  # vpc_link (option B, default): integrate with the HTTP :80 listener of the (internal) ALB.
+  # origin_header (option A): rules on the HTTPS :443 listener + public HTTPS to alb_origin_domain.
+  alb_integration      = var.alb_integration
+  alb_listener_arn     = var.alb_integration == "vpc_link" ? module.ecs_service.http_listener_arn : module.ecs_service.https_listener_arn
+  alb_listener_port    = var.alb_integration == "vpc_link" ? 80 : 443
+  alb_origin_domain    = var.alb_origin_domain
+  api_target_group_arn = module.ecs_service.target_group_arn
+
+  waiting_room_public = var.waiting_room_public
+}
+
+# Warning only. vpc_link needs the internal ALB (its ENIs sit in private subnets with no NAT, so they can't reach an
+# internet-facing ALB's public IPs) and the plain HTTP listener: with a certificate, :80 redirects to HTTPS and the
+# VPC link would get 301s. origin_header needs a public ALB, the HTTPS listener (certificate) and its own DNS name.
+check "auth_apigw_alb_integration" {
+  assert {
+    condition = (
+      (var.alb_integration == "vpc_link" && var.alb_internal && var.certificate_arn == "") ||
+      (var.alb_integration == "origin_header" && !var.alb_internal && var.certificate_arn != "" && var.alb_origin_domain != "")
+    )
+    error_message = "alb_integration = vpc_link needs alb_internal = true and certificate_arn = \"\"; origin_header needs alb_internal = false, certificate_arn and alb_origin_domain."
+  }
 }

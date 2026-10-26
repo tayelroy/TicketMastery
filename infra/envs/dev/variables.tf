@@ -66,6 +66,12 @@ variable "rds_extra_ingress_sg_ids" {
   default     = []
 }
 
+variable "alb_internal" {
+  description = "Internal ALB in the private subnets (true with alb_integration = vpc_link). When true, also set alb_ingress_cidrs = []."
+  type        = bool
+  default     = false
+}
+
 variable "certificate_arn" {
   description = "ACM certificate ARN in aws_region for the ALB HTTPS listener. Empty = HTTP only."
   type        = string
@@ -222,4 +228,31 @@ variable "db_skip_final_snapshot" {
   description = "Skip the final snapshot when destroying the DB."
   type        = bool
   default     = true
+}
+
+################################################################################
+# Auth + API Gateway (Andrew)
+################################################################################
+
+variable "alb_integration" {
+  description = "How API Gateway reaches the ALB: vpc_link (internal ALB, recommended) or origin_header (public ALB + secret header; needs certificate_arn and alb_origin_domain)."
+  type        = string
+  default     = "vpc_link"
+
+  validation {
+    condition     = contains(["vpc_link", "origin_header"], var.alb_integration)
+    error_message = "alb_integration must be vpc_link or origin_header."
+  }
+}
+
+variable "alb_origin_domain" {
+  description = "origin_header only: DNS name pointing at the ALB that matches certificate_arn, e.g. origin.example.com."
+  type        = string
+  default     = ""
+}
+
+variable "waiting_room_public" {
+  description = "true lets guests (no token) call /api/waiting-room; false (default) requires sign-in."
+  type        = bool
+  default     = false
 }
