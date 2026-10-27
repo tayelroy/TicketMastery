@@ -129,6 +129,26 @@ output "db_secret_arn" {
   value       = module.rds.master_user_secret_arn
 }
 
+output "frontend_bucket_name" {
+  description = "Frontend S3 bucket; GitHub repo variable FRONTEND_BUCKET_NAME."
+  value       = module.edge.frontend_bucket_name
+}
+
+output "cloudfront_distribution_id" {
+  description = "Frontend CloudFront distribution ID; GitHub repo variable CLOUDFRONT_DISTRIBUTION_ID, used to clear the cache after each deploy."
+  value       = module.edge.cloudfront_distribution_id
+}
+
+output "cloudfront_domain_name" {
+  description = "Default CloudFront domain serving the frontend."
+  value       = module.edge.cloudfront_domain_name
+}
+
+output "github_deploy_role_arn" {
+  description = "IAM role GitHub Actions assumes to deploy the frontend; GitHub repo variable AWS_DEPLOY_ROLE_ARN."
+  value       = module.github_deploy.github_deploy_role_arn
+}
+
 ################################################################################
 # Waiting room
 ################################################################################

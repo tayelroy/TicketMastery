@@ -141,7 +141,7 @@ module "github_deploy" {
 
   name = local.name
 
-  github_repository = "tayelroy/TicketMastery"
+  github_oidc_subject = "repo:tayelroy@23186072/TicketMastery@1423019527"
 
   frontend_bucket_arn = module.edge.frontend_bucket_arn
 
