@@ -179,9 +179,9 @@ The base stack is Elroy's. Its code is in `infra/` (`envs/dev`, `modules/{networ
 - **Flip**: set `db_multi_az = true` in `terraform.tfvars` and apply. This adds a synchronous standby in the second AZ with automatic failover, typically 60–120 s with no committed-data loss. `envs/dev` drops the AZ pin automatically (RDS rejects `availability_zone` together with `multi_az = true`, and the rds module enforces that with a precondition). Applying converts the instance in place, which can cause a brief performance impact, so do it outside a demo.
 - **Two AZs are still required** even with single-AZ RDS; see [why there are still two public and two private subnets](#implementation-vs-target-ha-design).
 
-## API Gateway → ALB integration (open, Andrew to decide)
+## API Gateway → ALB integration (decided: B, VPC link)
 
-The ALB lives in the public subnets today and is the origin for API Gateway. Two options:
+API Gateway is the only public entry to the API; the ALB is its origin. Two options were considered:
 
 | | A. Public ALB + `X-Origin-Verify` | B. Private (internal) ALB + VPC link |
 |---|---|---|
@@ -190,7 +190,7 @@ The ALB lives in the public subnets today and is the origin for API Gateway. Two
 | Pros | Small change: one listener rule on `alb_listener_arn` plus a default 403 action; easy to debug with `curl` | No public origin to bypass; no shared secret |
 | Cons | The ALB is still reachable from the internet. The header is a shared secret, and `alb_ingress_cidrs` can't be narrowed to API Gateway IPs reliably. | Needs `internal = true` on the ALB (base-stack change) and VPC link resources in `auth-apigw`; harder to test without a bastion |
 
-Current state: the ALB is public (`internal = false`, `alb_ingress_cidrs = ["0.0.0.0/0"]`), and no `X-Origin-Verify` listener rule exists yet. Option **A** fits as-is, once someone adds the header rule and the secret. If Andrew picks **HTTP API + VPC link (B)**, Elroy will make the ALB internal. `alb_listener_arn`, which the integration needs, is already an output.
+Current state: **HTTP API + VPC link (B)**. The ALB is internal (`alb_internal = true`, `alb_ingress_cidrs = []`, private subnets) and only the VPC link's security group may reach it on port 80; API Gateway integrates with `alb_listener_arn` (HTTP). A public ALB with `alb_integration = "vpc_link"` returns API Gateway 503s and fails the `auth_apigw_alb_integration` check.
 
 ## Instructor feedback (open items, not implemented)
 
