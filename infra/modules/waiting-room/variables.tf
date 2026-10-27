@@ -10,6 +10,11 @@ variable "private_subnet_ids" {
   type        = list(string)
 }
 
+variable "task_role_name" {
+  description = "ECS task role the API runs as (ecs-service output); gets SendMessage on join-queue and GetItem on live-queue"
+  type        = string
+}
+
 variable "waiting_ttl_seconds" {
   description = "How long a WAITING user's row lives before DynamoDB TTL deletes it (21600 = 6 hours)"
   type        = number

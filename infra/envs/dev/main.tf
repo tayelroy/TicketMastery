@@ -97,6 +97,10 @@ module "ecs_service" {
   extra_environment = {
     COGNITO_USER_POOL_ID = module.auth_apigw.user_pool_id
     COGNITO_CLIENT_ID    = module.auth_apigw.user_pool_client_id
+
+    # UC3 waiting room (Yan Ting)
+    WAITING_ROOM_JOIN_QUEUE_URL = module.waiting_room.join_queue_url
+    WAITING_ROOM_TABLE_NAME     = module.waiting_room.live_queue_table_name
   }
 
   enable_autoscaling       = var.enable_autoscaling
@@ -155,6 +159,7 @@ module "waiting_room" {
 
   vpc_id             = module.network.vpc_id
   private_subnet_ids = module.network.private_subnet_ids
+  task_role_name     = module.ecs_service.task_role_name
 }
 
 # Auth (Cognito) + API Gateway - Andrew
