@@ -1,5 +1,6 @@
 resource "aws_s3_bucket" "frontend" {
   bucket_prefix = "${var.name}-frontend-"
+  force_destroy = var.force_destroy
 
   tags = merge(var.tags, {
     Name = "${var.name}-frontend"
