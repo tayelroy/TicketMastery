@@ -51,7 +51,6 @@ async function startServer(env: Record<string, string>): Promise<StartResult> {
         ...(NODE_V8_COVERAGE ? { NODE_V8_COVERAGE } : {}),
         PORT: port,
         LOG_LEVEL: 'info',
-        APP_VERSION: 'test', // see helpers/cognito.ts
         DB_HOST: 'unused',
         DB_NAME: 'unused',
         DB_USER: 'unused',

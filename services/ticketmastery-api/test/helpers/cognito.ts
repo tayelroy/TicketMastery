@@ -23,8 +23,6 @@ export const KID = 'test-key-1';
 export const cognitoEnv: Record<string, string> = {
   NODE_ENV: 'test',
   LOG_LEVEL: 'silent',
-  // Set so version.ts doesn't read ../package.json, which the tsc build used by test:coverage doesn't have.
-  APP_VERSION: 'test',
   DB_HOST: 'unused',
   DB_NAME: 'unused',
   DB_USER: 'unused',

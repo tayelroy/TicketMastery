@@ -17,7 +17,7 @@
     "seed:prod": "node dist/db/seed.js",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts",
-    "test:coverage": "node -e \"require('node:fs').rmSync('coverage', { recursive: true, force: true })\" && tsc -p tsconfig.test.json --noEmit false --outDir coverage/build && c8 node --test --test-concurrency=1 coverage/build/test/*.test.js"
+    "test:coverage": "node -e \"require('node:fs').rmSync('coverage', { recursive: true, force: true })\" && tsc -p tsconfig.test.json --noEmit false --outDir coverage/build && node -e \"const fs = require('node:fs'); fs.cpSync('migrations', 'coverage/build/migrations', { recursive: true }); fs.copyFileSync('package.json', 'coverage/build/package.json')\" && c8 node --test --test-concurrency=1 coverage/build/test/*.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-sns": "^3.1156.0",
