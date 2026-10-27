@@ -1,0 +1,388 @@
+/* UC5 organiser styles. Shared tokens (--glass, --ink, ...) come from src/app/styles.css. */
+
+.org-head {
+  margin-top: 0;
+  align-items: flex-end;
+}
+
+.org-head h1 {
+  margin: 0;
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+}
+
+.org-back {
+  display: inline-block;
+  margin-bottom: 1rem;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.org-back:hover {
+  color: var(--text);
+}
+
+/* ---------- Form controls the shared stylesheet does not cover ---------- */
+
+.org-form textarea,
+.org-panel textarea,
+.org-panel select {
+  font: inherit;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  background: var(--glass);
+  color: var(--text);
+}
+
+.org-panel select {
+  border-radius: 999px;
+}
+
+.org-panel select option {
+  color: var(--ink);
+}
+
+.org-form textarea:focus-visible,
+.org-panel textarea:focus-visible,
+.org-panel select:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 3px;
+}
+
+.org-panel input,
+.org-panel select {
+  min-width: 0;
+  padding: 0.55rem 0.9rem;
+}
+
+/* Scoped to organiser forms so other pages keep their own button styles. */
+.org-form button:disabled,
+.org-panel button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.org-panel button.danger {
+  background: var(--coral);
+  color: #ffffff;
+}
+
+/* ---------- Concert list ---------- */
+
+.org-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.org-list-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 22px;
+  color: var(--text);
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.org-list-item:hover {
+  background: var(--glass-strong);
+}
+
+.org-list-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.org-list-info small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.org-status {
+  flex: none;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+}
+
+.org-status.draft {
+  background: var(--glass-dark);
+  color: var(--text);
+}
+
+.org-status.on_sale {
+  background: var(--ok);
+}
+
+.org-status.cancelled {
+  background: var(--bad);
+  color: var(--coral);
+}
+
+/* ---------- Create form ---------- */
+
+.org-form {
+  margin-bottom: 1.5rem;
+}
+
+.org-form h2,
+.org-panel h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.3rem;
+}
+
+.org-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.org-grid .wide {
+  grid-column: 1 / -1;
+}
+
+/* ---------- Concert management ---------- */
+
+.org-summary-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.org-summary h1 {
+  margin: 0;
+}
+
+.org-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem 1.5rem;
+  margin: 1.25rem 0 0;
+}
+
+.org-facts dt {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.org-facts dd {
+  margin: 0;
+  font-weight: 500;
+}
+
+.org-banner {
+  margin: 1.25rem 0 0;
+  padding: 0.7rem 1.1rem;
+  border-radius: 18px;
+  background: var(--glass-dark);
+  font-size: 0.92rem;
+}
+
+.org-banner.bad {
+  color: var(--bad);
+}
+
+.org-panel {
+  margin-top: 1.25rem;
+}
+
+.org-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.org-checklist {
+  margin: 0.75rem 0 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.org-checklist li.done {
+  color: var(--ok);
+}
+
+.org-checklist li.done::after {
+  content: ' ✓';
+}
+
+.org-saved {
+  align-self: center;
+  color: var(--ok);
+  font-weight: 500;
+}
+
+.org-error {
+  margin-top: 1rem;
+  padding: 0.8rem 1.1rem;
+  border-radius: 18px;
+  background: var(--glass-dark);
+  color: var(--bad);
+  font-size: 0.92rem;
+}
+
+.org-error ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+}
+
+/* Ticket type editor: a table-like grid that stacks on narrow screens. */
+.org-table {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  overflow-x: auto;
+}
+
+.org-tt-row,
+.org-layout-row {
+  display: grid;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.org-tt-row {
+  grid-template-columns: minmax(90px, 1fr) minmax(120px, 2fr) 110px 100px 100px 2rem;
+  min-width: 620px;
+}
+
+.org-layout-row {
+  grid-template-columns: 80px minmax(120px, 1fr) 100px 100px 2rem;
+  margin-bottom: 0.5rem;
+  min-width: 460px;
+}
+
+.org-tt-row.head,
+.org-layout-row.head {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.org-tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.org-tally li {
+  padding: 0.3rem 0.8rem;
+  border-radius: 999px;
+  background: var(--glass-dark);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.org-tally li.ok {
+  color: var(--ok);
+}
+
+.org-tally li.bad {
+  color: var(--bad);
+}
+
+.org-section {
+  margin: 1rem 0 0;
+  padding: 1rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 22px;
+  overflow-x: auto;
+}
+
+.org-section legend {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0 0.4rem;
+}
+
+.org-readonly {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.org-readonly li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+}
+
+/* ---------- Dashboard ---------- */
+
+.org-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.org-stat {
+  display: flex;
+  flex-direction: column;
+  padding: 0.9rem 1.1rem;
+  border-radius: 20px;
+  background: var(--glass-dark);
+}
+
+.org-stat strong {
+  font-size: 1.4rem;
+}
+
+.org-dash-table {
+  width: 100%;
+  margin-top: 1rem;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.org-dash-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.org-dash-table th,
+.org-dash-table td {
+  padding: 0.5rem 0.4rem;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+/* ---------- Cancel ---------- */
+
+.org-danger-link {
+  margin-top: 1.5rem;
+  text-align: right;
+}
+
+.org-danger h2 {
+  color: var(--bad);
+}
+
+.org-empty {
+  margin: 1.5rem 0 0;
+  padding: 0.85rem 1.2rem;
+  border-radius: 20px;
+  font-size: 0.92rem;
+}

@@ -3,8 +3,8 @@
 The single backend service for TicketMastery: Node 20 + Express 4 + TypeScript, `pg` (no ORM), `zod`,
 `pino`. Runs on ECS Fargate (private subnets, 2 AZs) behind API Gateway -> ALB, talking to RDS PostgreSQL.
 
-UC5 (organiser concert & ticket management) is implemented; UC1–UC4 modules are registered stubs that
-return `501` until their owners fill them in.
+UC5 (organiser concert & ticket management) is implemented; UC4 checkout (hold, release, confirm) is implemented;
+UC1–UC3 modules are registered stubs that return `501` until their owners fill them in.
 
 ## Run locally
 
@@ -111,7 +111,7 @@ conflict -> 409.
 | `/api/concerts` | `discovery` | UC1 Concert discovery | Cody & Nai Xin | stub (501) |
 | `/api/me` | `account` | UC2 My Tickets & Account | Andrew | stub (501) |
 | `/api/waiting-room` | `waiting-room` | UC3 Virtual waiting room | Yan Ting | stub (501) |
-| `/api/checkout` | `checkout` | UC4 Seat selection & checkout | Shi Hui | stub (501) |
+| `/api/checkout` | `checkout` | UC4 Seat selection & checkout | Shi Hui | implemented (hold, release, confirm) |
 | `/api/organiser` | `organiser` | UC5 Concert & ticket management | Elroy | implemented |
 
 Each module has a `README.md` with its planned endpoints.
@@ -152,6 +152,7 @@ Validated with zod at startup (`src/config.ts`); invalid config exits with a lis
 | `ALLOW_DEV_AUTH` | `false` | must be `true` to run `dev-header` with `NODE_ENV=production`; logs a warning |
 | `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID` | unset | required with `AUTH_MODE=cognito`; Terraform sets them from `module.auth_apigw` |
 | `RUN_MIGRATIONS_ON_START` | `false` | migrate (advisory-locked) before listening |
+| `ORDER_EVENTS_TOPIC_ARN` | unset | UC4: SNS `order-events` topic for `OrderConfirmed`; unset = event only logged |
 
 ### AWS notes
 
