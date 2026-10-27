@@ -1,60 +1,41 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, ApiError } from '../../api/client';
+import { api } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
+import { formatPrice, type ConcertSummary } from './types';
 import './concerts.css';
-
-/** One concert as GET /api/concerts returns it (same camelCase fields as the organiser API). */
-export interface ConcertSummary {
-  id: string;
-  title: string;
-  artist: string;
-  venueName: string;
-  startsAt: string;
-  imageUrl: string | null;
-}
-
-/** Shown only while GET /api/concerts is still a 501 stub, so the card design can be seen. Not real data. */
-const SAMPLE: ConcertSummary = {
-  id: 'sample',
-  title: 'Sample Concert',
-  artist: 'Sample Artist',
-  venueName: 'Singapore Indoor Stadium',
-  startsAt: '2026-12-19T14:00:00Z',
-  imageUrl: null,
-};
 
 type State =
   | { kind: 'loading' }
   | { kind: 'ready'; concerts: ConcertSummary[] }
-  | { kind: 'not-built' }
   | { kind: 'error'; message: string };
+
+/** Wait this long after the last keystroke before searching, so typing does not fire a request per key. */
+const SEARCH_DEBOUNCE_MS = 300;
 
 export function ConcertListPage() {
   const { session } = useAuth();
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [query, setQuery] = useState('');
+  const search = query.trim();
 
+  // Search runs on the API (title, artist and venue), so it covers every concert, not just the loaded page.
   useEffect(() => {
     let cancelled = false;
-    api<{ concerts: ConcertSummary[] }>('/api/concerts')
-      .then((r) => !cancelled && setState({ kind: 'ready', concerts: r.concerts }))
-      .catch((e) => {
-        if (cancelled) return;
-        if (e instanceof ApiError && e.status === 501) setState({ kind: 'not-built' });
-        else setState({ kind: 'error', message: (e as Error).message });
-      });
+    const timer = setTimeout(
+      () => {
+        const params = search ? `?${new URLSearchParams({ q: search })}` : '';
+        api<{ concerts: ConcertSummary[] }>(`/api/concerts${params}`)
+          .then((r) => !cancelled && setState({ kind: 'ready', concerts: r.concerts }))
+          .catch((e) => !cancelled && setState({ kind: 'error', message: (e as Error).message }));
+      },
+      search ? SEARCH_DEBOUNCE_MS : 0,
+    );
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, []);
-
-  const concerts = state.kind === 'ready' ? state.concerts : state.kind === 'not-built' ? [SAMPLE] : [];
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return concerts;
-    return concerts.filter((c) => [c.title, c.artist, c.venueName].some((s) => s.toLowerCase().includes(q)));
-  }, [concerts, query]);
+  }, [search]);
 
   return (
     <>
@@ -82,11 +63,6 @@ export function ConcertListPage() {
         {state.kind === 'ready' && <span className="muted small">{state.concerts.length} shows</span>}
       </div>
 
-      {state.kind === 'not-built' && (
-        <p className="notice glass">
-          Preview: <code>GET /api/concerts</code> is not built yet, so this is a sample card showing the design.
-        </p>
-      )}
       {state.kind === 'error' && <p className="notice glass">Couldn't load concerts: {state.message}</p>}
 
       {state.kind === 'loading' ? (
@@ -95,17 +71,17 @@ export function ConcertListPage() {
             <div key={i} className="event-card skeleton" />
           ))}
         </div>
-      ) : visible.length ? (
+      ) : state.kind === 'ready' && state.concerts.length ? (
         <div className="event-grid">
-          {visible.map((c) => (
+          {state.concerts.map((c) => (
             <EventCard key={c.id} concert={c} />
           ))}
         </div>
-      ) : (
+      ) : state.kind === 'ready' ? (
         <p className="notice glass">
-          {query ? `No concerts match “${query}”.` : 'No upcoming concerts yet. Check back soon.'}
+          {search ? `No concerts match “${search}”.` : 'No upcoming concerts yet. Check back soon.'}
         </p>
-      )}
+      ) : null}
     </>
   );
 }
@@ -115,15 +91,9 @@ function EventCard({ concert }: { concert: ConcertSummary }) {
   const day = date.toLocaleDateString('en-SG', { day: 'numeric' });
   const month = date.toLocaleDateString('en-SG', { month: 'short' });
   const time = date.toLocaleTimeString('en-SG', { hour: 'numeric', minute: '2-digit' });
-  const isSample = concert.id === SAMPLE.id;
 
   return (
-    <Link
-      to={isSample ? '#' : `/concerts/${concert.id}`}
-      className="event-card"
-      onClick={isSample ? (e) => e.preventDefault() : undefined}
-      aria-disabled={isSample || undefined}
-    >
+    <Link to={`/concerts/${concert.id}`} className="event-card">
       {concert.imageUrl ? (
         <img src={concert.imageUrl} alt="" loading="lazy" />
       ) : (
@@ -134,6 +104,7 @@ function EventCard({ concert }: { concert: ConcertSummary }) {
         <strong>{day}</strong>
         <small>{month}</small>
       </span>
+      {concert.status === 'sold_out' && <span className="badge status-badge">Sold out</span>}
 
       <div className="event-bar">
         <span className="avatar">{concert.artist.charAt(0)}</span>
@@ -143,7 +114,11 @@ function EventCard({ concert }: { concert: ConcertSummary }) {
             {concert.venueName} · {time}
           </small>
         </div>
-        <span className="price-pill">Tickets</span>
+        <span className="price-pill">
+          {concert.minPriceCents !== null && concert.currency
+            ? `From ${formatPrice(concert.minPriceCents, concert.currency)}`
+            : 'Tickets'}
+        </span>
       </div>
     </Link>
   );

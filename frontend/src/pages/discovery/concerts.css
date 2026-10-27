@@ -201,3 +201,232 @@
     animation: none;
   }
 }
+
+.status-badge {
+  position: absolute;
+  top: 1.4rem;
+  left: 1.1rem;
+}
+
+/* ---------- Concert detail ---------- */
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.back-link:hover {
+  color: var(--text);
+}
+
+.concert-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 1.75rem;
+  padding: 1rem;
+  border-radius: var(--radius);
+}
+
+.concert-hero.skeleton {
+  min-height: 320px;
+  animation: pulse 1.4s ease-in-out infinite;
+  background: var(--glass);
+}
+
+.concert-hero-image {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  border-radius: 24px;
+  overflow: hidden;
+}
+
+.concert-hero-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.concert-hero-image .event-image-empty {
+  inset: 0;
+}
+
+.concert-hero-body {
+  padding: 0.75rem 0.75rem 0.75rem 0;
+}
+
+.concert-hero-body h1 {
+  margin: 0 0 1rem;
+  font-size: clamp(2rem, 4.5vw, 2.8rem);
+}
+
+.concert-facts {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.concert-facts dt {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.concert-facts dd {
+  margin: 0;
+  font-weight: 500;
+}
+
+.concert-description {
+  margin: 1.25rem 0 0;
+  color: var(--muted);
+  white-space: pre-line;
+}
+
+.sale-banner {
+  margin: 1.5rem 0 0;
+  padding: 0.75rem 1.1rem;
+  border-radius: 18px;
+  background: var(--glass-dark);
+  font-weight: 500;
+}
+
+.sale-banner.open {
+  color: var(--ok);
+}
+
+.sale-banner.bad {
+  color: var(--bad);
+}
+
+@media (max-width: 720px) {
+  .concert-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .concert-hero-image {
+    aspect-ratio: 16 / 9;
+  }
+
+  .concert-hero-body {
+    padding: 0 0.5rem 0.75rem;
+  }
+}
+
+.ticket-types {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ticket-type {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 22px;
+}
+
+.ticket-type-info,
+.ticket-type-price {
+  display: flex;
+  flex-direction: column;
+}
+
+.ticket-type-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.ticket-type-price {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.seat-swatch {
+  flex: none;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+}
+
+/* ---------- Seat map ---------- */
+
+.seat-map {
+  padding: 1.25rem;
+  border-radius: var(--radius);
+  overflow-x: auto;
+}
+
+.stage {
+  margin: 0 auto 1.25rem;
+  max-width: 320px;
+  padding: 0.4rem;
+  border-radius: 0 0 40px 40px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}
+
+.seat-section + .seat-section {
+  margin-top: 1.25rem;
+}
+
+.seat-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.seat-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.seat-row-label {
+  flex: none;
+  width: 2rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.seat-dot {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px 4px 6px 6px;
+}
+
+.seat-dot.held {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+
+.seat-dot.sold {
+  background: var(--glass-dark);
+}
+
+.seat-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.seat-legend .seat-dot.sold {
+  margin-left: 0.6rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .concert-hero.skeleton {
+    animation: none;
+  }
+}
