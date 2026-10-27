@@ -1,0 +1,249 @@
+/* UC3 waiting room. Builds on the shared theme in src/app/styles.css. */
+
+.wr-back {
+  display: inline-block;
+  margin-bottom: 1rem;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.wr-back:hover {
+  color: var(--text);
+}
+
+.wr-card {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem;
+  border-radius: var(--radius);
+}
+
+.wr-skeleton {
+  min-height: 420px;
+}
+
+.wr-head {
+  text-align: center;
+}
+
+.wr-head h1 {
+  margin: 0 0 0.4rem;
+  font-size: clamp(1.8rem, 4.5vw, 2.6rem);
+}
+
+.wr-head p {
+  margin: 0;
+}
+
+.wr-panel {
+  margin-top: 1.75rem;
+  padding: 1.75rem 1.5rem;
+  border-radius: 24px;
+  background: var(--glass-dark);
+  text-align: center;
+}
+
+.wr-panel-top {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.wr-label {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wr-number {
+  margin: 0.25rem 0 0;
+  font-size: clamp(3.5rem, 14vw, 5.5rem);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.wr-ahead {
+  margin: 0.6rem 0 0;
+  font-size: 1.1rem;
+}
+
+.wr-title {
+  margin: 0 0 0.4rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.wr-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(124, 240, 180, 0.15);
+  color: var(--ok);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.wr-live::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentColor;
+  animation: wr-pulse 1.6s ease-in-out infinite;
+}
+
+.wr-progress {
+  height: 10px;
+  margin: 1.5rem auto 0;
+  max-width: 460px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+
+.wr-progress span {
+  display: block;
+  height: 100%;
+  min-width: 10px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ffffff, var(--ok));
+  transition: width 0.8s ease;
+}
+
+.wr-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1.5rem 0 0;
+}
+
+.wr-stats dt {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.wr-stats dd {
+  margin: 0.15rem 0 0;
+  font-weight: 600;
+}
+
+.wr-joining .wr-title {
+  margin-top: 1rem;
+}
+
+.wr-spinner {
+  display: inline-block;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #ffffff;
+  animation: wr-spin 0.9s linear infinite;
+}
+
+.wr-admitted {
+  background: linear-gradient(160deg, rgba(124, 240, 180, 0.22), var(--glass-dark));
+  box-shadow: inset 0 0 0 1px rgba(124, 240, 180, 0.45);
+}
+
+.wr-admitted .wr-title {
+  margin-top: 0.4rem;
+  font-size: 2rem;
+}
+
+.wr-countdown {
+  font-variant-numeric: tabular-nums;
+}
+
+.wr-cta {
+  margin-top: 1rem;
+  background: var(--ink);
+  color: #ffffff;
+}
+
+.wr-panel button {
+  margin-top: 1rem;
+}
+
+.wr-note {
+  margin: 1.25rem 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.wr-note.bad {
+  color: var(--bad);
+}
+
+.wr-demo {
+  max-width: 720px;
+  margin: 1rem auto 0;
+  padding: 0.75rem 1.1rem;
+  border-radius: 18px;
+  border: 1px dashed var(--glass-border);
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.wr-tips {
+  max-width: 720px;
+  margin: 1.25rem auto 0;
+  padding: 1.5rem 2rem;
+  border-radius: var(--radius);
+}
+
+.wr-tips h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.2rem;
+}
+
+.wr-tips ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.5rem;
+  color: var(--muted);
+}
+
+.wr-tips strong {
+  color: var(--text);
+}
+
+@keyframes wr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes wr-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (max-width: 560px) {
+  .wr-card,
+  .wr-tips {
+    padding: 1.5rem 1.1rem;
+  }
+
+  .wr-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wr-live::before,
+  .wr-spinner {
+    animation: none;
+  }
+}

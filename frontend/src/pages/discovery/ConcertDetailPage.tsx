@@ -96,6 +96,13 @@ export function ConcertDetailPage() {
           {concert.description && <p className="concert-description">{concert.description}</p>}
 
           <SaleBanner concert={concert} sale={sale} />
+          {sale === 'upcoming' && (
+            <div className="row">
+              <Link to={`/concerts/${concert.id}/waiting-room`} className="btn">
+                Join waiting room
+              </Link>
+            </div>
+          )}
           {sale === 'open' && (
             <div className="row">
               <Link to={`/concerts/${concert.id}/waiting-room`} className="btn">
