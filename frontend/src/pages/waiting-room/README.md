@@ -2,7 +2,7 @@
 
 **Owner:** Yan Ting
 **Calls:** `/api/waiting-room` (API module `services/ticketmastery-api/src/modules/waiting-room/`)
-**Status:** placeholder page.
+**Status:** page built. While the API returns `501`, `queue.ts` simulates the queue in the browser ("Demo mode" banner). The planned `status` response shape is `QueueStatus` in `types.ts`.
 
 ## Routes
 
