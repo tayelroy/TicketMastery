@@ -17,3 +17,9 @@ variable "api_gateway_domain" {
   type        = string
   default     = ""
 }
+
+variable "force_destroy" {
+  description = "Allow `terraform destroy` to delete the frontend bucket even if it still contains objects (including old versions)."
+  type        = bool
+  default     = true
+}

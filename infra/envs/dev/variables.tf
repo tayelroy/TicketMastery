@@ -55,9 +55,9 @@ variable "enable_vpc_endpoints" {
 ################################################################################
 
 variable "alb_ingress_cidrs" {
-  description = "IPv4 CIDRs allowed to reach the ALB."
+  description = "IPv4 CIDRs allowed to reach the ALB. Empty for the internal ALB (alb_internal = true); the VPC link reaches it through its own security group rule."
   type        = list(string)
-  default     = ["0.0.0.0/0"]
+  default     = []
 }
 
 variable "rds_extra_ingress_sg_ids" {
@@ -69,7 +69,7 @@ variable "rds_extra_ingress_sg_ids" {
 variable "alb_internal" {
   description = "Internal ALB in the private subnets (true with alb_integration = vpc_link). When true, also set alb_ingress_cidrs = []."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "certificate_arn" {
