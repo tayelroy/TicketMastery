@@ -16,12 +16,14 @@
     "seed": "tsx --env-file=.env src/db/seed.ts",
     "seed:prod": "node dist/db/seed.js",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts"
+    "test": "node --import tsx --test --test-concurrency=1 test/*.test.ts",
+    "test:coverage": "node -e \"require('node:fs').rmSync('coverage', { recursive: true, force: true })\" && tsc -p tsconfig.test.json --noEmit false --outDir coverage/build && node -e \"const fs = require('node:fs'); fs.cpSync('migrations', 'coverage/build/migrations', { recursive: true }); fs.copyFileSync('package.json', 'coverage/build/package.json')\" && c8 node --test --test-concurrency=1 coverage/build/test/*.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1157.0",
     "@aws-sdk/client-sns": "^3.1156.0",
     "@aws-sdk/client-sqs": "^3.1157.0",
+    "aws-jwt-verify": "^5.2.1",
     "express": "^4.22.3",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
@@ -32,6 +34,7 @@
     "@types/express": "^4.17.25",
     "@types/node": "^20.19.43",
     "@types/pg": "^8.23.1",
+    "c8": "^12.0.0",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3"
   }
