@@ -13,7 +13,8 @@ All routes need a signed-in fan (any user; no group). `401` when anonymous.
 The concert (with `onSale`), its ticket types, every seat grouped by section and row with `status`
 `available` / `held` (by someone else) / `yours` / `sold`, `bookingFeeCentsPerSeat`, and the fan's `activeHold`
 (same body as the hold response below, or `null`) so a page refresh keeps the countdown. `404` for a missing or
-draft concert. A stand-in until UC1's `/api/concerts` has a seat map; it reads UC5 tables through UC4's own SQL.
+draft concert. UC1's public `GET /api/concerts/:id/seats` doesn't know who is asking, so it can't show `yours`, the
+active hold or the booking fee; this one is per fan (`Cache-Control: no-store`). It reads UC5 tables through UC4's own SQL.
 
 ### `POST /api/checkout/holds` — hold seats for 10 minutes
 
