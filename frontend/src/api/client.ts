@@ -31,7 +31,7 @@ export async function api<T>(path: string, { body, headers, ...init }: ApiOption
     headers: {
       accept: 'application/json',
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...authHeaders(),
+      ...(await authHeaders()),
       ...headers,
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
