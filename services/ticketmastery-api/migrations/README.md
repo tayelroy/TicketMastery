@@ -40,6 +40,7 @@ NNNN_<uc-or-owner>_<description>.sql
 | File | Owner | Tables |
 |------|-------|--------|
 | `0001_uc5_concerts_ticket_types_seats.sql` | Elroy (UC5) | `concerts`, `ticket_types`, `sections`, `rows`, `seats`, view `concert_seat_counts`, layout-lock triggers |
+| `0002_uc4_orders.sql` | Shi Hui (UC4) | `orders`, `order_items`; adds FK `seats.order_id -> orders.id` and requires `order_id` on sold seats |
 
 Seat hold columns on `seats` (`status`, `held_by`, `hold_id`, `held_at`, `hold_expires_at`, `sold_at`,
 `order_id`) are the contract with UC4 (Shi Hui); the canonical hold/confirm/release/sweep statements and why

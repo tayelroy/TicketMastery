@@ -3,10 +3,9 @@ variable "name" {
   type        = string
 }
 
-variable "github_repository" {
-  description = "GitHub repository allowed to deploy"
+variable "github_oidc_subject" {
+  description = "OIDC subject prefix of the GitHub repo allowed to deploy. Repos on immutable subjects send repo:<owner>@<owner_id>/<repo>@<repo_id>; check with gh api repos/<owner>/<repo>/actions/oidc/customization/sub."
   type        = string
-  default     = "tayelroy/TicketMastery"
 }
 
 variable "frontend_bucket_arn" {

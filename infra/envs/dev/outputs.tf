@@ -129,6 +129,26 @@ output "db_secret_arn" {
   value       = module.rds.master_user_secret_arn
 }
 
+output "frontend_bucket_name" {
+  description = "Frontend S3 bucket; GitHub repo variable FRONTEND_BUCKET_NAME."
+  value       = module.edge.frontend_bucket_name
+}
+
+output "cloudfront_distribution_id" {
+  description = "Frontend CloudFront distribution ID; GitHub repo variable CLOUDFRONT_DISTRIBUTION_ID, used to clear the cache after each deploy."
+  value       = module.edge.cloudfront_distribution_id
+}
+
+output "cloudfront_domain_name" {
+  description = "Default CloudFront domain serving the frontend."
+  value       = module.edge.cloudfront_domain_name
+}
+
+output "github_deploy_role_arn" {
+  description = "IAM role GitHub Actions assumes to deploy the frontend; GitHub repo variable AWS_DEPLOY_ROLE_ARN."
+  value       = module.github_deploy.github_deploy_role_arn
+}
+
 ################################################################################
 # Waiting room
 ################################################################################
@@ -146,6 +166,35 @@ output "join_queue_arn" {
 output "live_queue_table_name" {
   description = "DynamoDB live-queue table name; the API reads queue positions from it."
   value       = module.waiting_room.live_queue_table_name
+}
+
+################################################################################
+# Auth + API Gateway
+################################################################################
+
+output "cognito_user_pool_id" {
+  description = "Cognito user pool ID; GitHub repo variable COGNITO_USER_POOL_ID (frontend build)."
+  value       = module.auth_apigw.user_pool_id
+}
+
+output "cognito_user_pool_client_id" {
+  description = "Cognito browser app client ID; GitHub repo variable COGNITO_CLIENT_ID (frontend build)."
+  value       = module.auth_apigw.user_pool_client_id
+}
+
+output "cognito_issuer_url" {
+  description = "JWT issuer of the user pool."
+  value       = module.auth_apigw.issuer_url
+}
+
+output "api_endpoint" {
+  description = "API Gateway base URL; test with curl $(terraform output -raw api_endpoint)/health."
+  value       = module.auth_apigw.api_endpoint
+}
+
+output "api_access_log_group_name" {
+  description = "CloudWatch log group with API Gateway access logs."
+  value       = module.auth_apigw.access_log_group_name
 }
 
 ################################################################################

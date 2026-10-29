@@ -38,7 +38,7 @@ data "aws_iam_policy_document" "github_trust" {
       variable = "token.actions.githubusercontent.com:sub"
 
       values = [
-        "repo:${var.github_repository}:ref:refs/heads/main"
+        "${var.github_oidc_subject}:ref:refs/heads/main"
       ]
     }
   }
