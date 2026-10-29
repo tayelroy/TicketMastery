@@ -1,11 +1,40 @@
-import { notImplementedRouter } from '../stub';
+import { Router } from 'express';
+import { asyncHandler } from '../../http/errors';
+import { concertIdParams, listConcertsQuery } from './schemas';
+import * as service from './service';
 
 /**
- * UC1 Concert discovery — owner: Cody & Nai Xin. Mounted at /api/concerts.
- *
- * TODO(Cody & Nai Xin): replace this stub with the real router. Planned endpoints:
- *   GET /api/concerts — public list of published concerts (status scheduled/on_sale/sold_out), search/filter by artist, venue, date
- *   GET /api/concerts/:id — concert detail with ticket types and prices
- *   GET /api/concerts/:id/seats — seat map with live availability (treat held seats whose hold_expires_at < now() as available)
+ * UC1 Concert discovery (Cody & Nai Xin). Mounted at /api/concerts. Public: no login required, so no
+ * `authenticate` here (add it if a route ever needs the optional req.user).
  */
-export const discoveryRouter = notImplementedRouter('discovery', 'UC1', 'Cody & Nai Xin');
+export const discoveryRouter = Router();
+
+discoveryRouter.get(
+  '/',
+  asyncHandler(async (req, res) => {
+    const filters = listConcertsQuery.parse(req.query);
+    // CloudFront may cache the listing briefly; new concerts appear within a minute.
+    res.set('Cache-Control', 'public, max-age=60');
+    res.json(await service.listConcerts(filters));
+  }),
+);
+
+discoveryRouter.get(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const { id } = concertIdParams.parse(req.params);
+    // Includes per-ticket-type availability, so keep the cache window short.
+    res.set('Cache-Control', 'public, max-age=15');
+    res.json(await service.getConcert(id));
+  }),
+);
+
+discoveryRouter.get(
+  '/:id/seats',
+  asyncHandler(async (req, res) => {
+    const { id } = concertIdParams.parse(req.params);
+    // Live seat states during checkout; must never be served from a cache.
+    res.set('Cache-Control', 'no-store');
+    res.json(await service.getSeatMap(id));
+  }),
+);

@@ -79,10 +79,11 @@ When `RUN_MIGRATIONS_ON_START=true`, the API applies pending SQL migrations from
 
 ```bash
 cd infra/envs/dev
-curl -i "http://$(terraform output -raw alb_dns_name)/health"
+curl -i "$(terraform output -raw api_endpoint)/health"
+curl -i "https://$(terraform output -raw cloudfront_domain_name)/health"
 ```
 
-Expect `200` with `{"status":"ok","db":"ok",...}`. A `503` with JSON `"db":"down"` comes from the API itself: the API can't reach the database (check the SG chain, the secret, and `DB_SSL`). A plain `502`/`503` page from the ALB means no task is registered or running yet. `/health/live` answers without touching the DB. Always test through the ALB: the task's public IP accepts no inbound connections (only the ALB security group may connect). If it isn't healthy after a few minutes:
+Expect `200` with `{"status":"ok","db":"ok",...}`. The ALB is internal, so `alb_dns_name` only resolves to private IPs and can't be reached from a laptop; test through API Gateway (or CloudFront, which forwards `/health` and `/api/*` to it). A `503` with JSON `"db":"down"` comes from the API itself: the API can't reach the database (check the SG chain, the secret, and `DB_SSL`). `{"message":"Service Unavailable"}` from API Gateway means the VPC link can't reach the ALB or no task is registered yet. `/health/live` answers without touching the DB. If it isn't healthy after a few minutes:
 
 ```bash
 aws logs tail "$(terraform output -raw log_group_name)" --follow
@@ -90,7 +91,7 @@ aws ecs describe-services --cluster "$(terraform output -raw ecs_cluster_name)" 
   --services "$(terraform output -raw ecs_service_name)" --query 'services[0].events[0:5]'
 ```
 
-Until Cognito is live, the service runs `AUTH_MODE=dev-header`. **Anyone who can reach the ALB can impersonate any user**, so don't leave it running with real data, and switch `auth_mode = "cognito"` as soon as Andrew's authorizer exists.
+Until Cognito is live, the service runs `AUTH_MODE=dev-header`. API Gateway's JWT authorizer guards the protected routes, but **anyone with a valid Cognito token can send `x-dev-user-id` / `x-dev-user-groups` and impersonate any user**, so don't leave it running with real data, and switch `auth_mode = "cognito"` as soon as the API verifies tokens (#12).
 
 ## Reading the DB secret
 

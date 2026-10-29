@@ -16,7 +16,8 @@ const optionalString = z
   .optional()
   .transform((v) => (v === undefined || v.trim() === '' ? undefined : v));
 
-const envSchema = z
+/** Exported for tests; the app reads the parsed `config` below. */
+export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -54,11 +55,21 @@ const envSchema = z
           'Set AUTH_MODE=cognito, or ALLOW_DEV_AUTH=true to accept the risk temporarily.',
       });
     }
+    if (env.AUTH_MODE === 'cognito' && (!env.COGNITO_USER_POOL_ID || !env.COGNITO_CLIENT_ID)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['AUTH_MODE'],
+        message:
+          'AUTH_MODE=cognito needs COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID ' +
+          '(in AWS they come from module.auth_apigw outputs via extra_environment).',
+      });
+    }
   });
 
 export type Config = z.infer<typeof envSchema>;
 
-function loadConfig(env: NodeJS.ProcessEnv): Config {
+/** Parses `env`, or reports every problem on stderr and exits 1. Exported for tests. */
+export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
     // The logger depends on config, so report straight to stderr and stop.

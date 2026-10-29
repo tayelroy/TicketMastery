@@ -54,3 +54,24 @@ resource "aws_iam_role_policy" "queue_manager" {
   role   = aws_iam_role.queue_manager.id
   policy = data.aws_iam_policy_document.queue_manager.json
 }
+
+# The API (ECS Fargate task role) sends joins and reads queue status. Nothing else.
+data "aws_iam_policy_document" "api" {
+  statement {
+    sid       = "SendJoins"
+    actions   = ["sqs:SendMessage"]
+    resources = [aws_sqs_queue.join.arn]
+  }
+
+  statement {
+    sid       = "ReadQueueStatus"
+    actions   = ["dynamodb:GetItem"]
+    resources = [aws_dynamodb_table.live_queue.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "api" {
+  name   = "waiting-room-api-access"
+  role   = var.task_role_name
+  policy = data.aws_iam_policy_document.api.json
+}

@@ -17,9 +17,15 @@ enable_gateway_endpoints = true           # S3 + DynamoDB, free
 enable_vpc_endpoints     = false          # ecr.api/ecr.dkr/logs/secretsmanager/sqs, ~USD 95/month
 
 # Security
-alb_ingress_cidrs        = ["0.0.0.0/0"]
+alb_ingress_cidrs        = [] # internal ALB: only the API Gateway VPC link reaches it; ["0.0.0.0/0"] only with alb_internal = false
 rds_extra_ingress_sg_ids = [] # e.g. ["sg-0123456789abcdef0"] for a VPC Lambda
 certificate_arn          = "" # ACM ARN in ap-southeast-1 enables HTTPS + HTTP->HTTPS redirect
+
+# Auth + API Gateway (Andrew)
+alb_integration     = "vpc_link" # or "origin_header" (needs certificate_arn + alb_origin_domain)
+alb_internal        = true       # internal ALB with vpc_link (+ alb_ingress_cidrs = []); false only for origin_header
+alb_origin_domain   = ""         # origin_header only, e.g. "origin.example.com"
+waiting_room_public = false      # true = guests can join the waiting room without signing in
 
 # API service
 image_tag                     = "latest"
