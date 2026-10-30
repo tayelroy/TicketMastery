@@ -101,6 +101,9 @@ module "ecs_service" {
     # UC3 waiting room (Yan Ting)
     WAITING_ROOM_JOIN_QUEUE_URL = module.waiting_room.join_queue_url
     WAITING_ROOM_TABLE_NAME     = module.waiting_room.live_queue_table_name
+
+    # UC4 e-ticket pipeline (Shi Hui): checkout publishes OrderConfirmed here
+    ORDER_EVENTS_TOPIC_ARN = module.messaging.order_events_topic_arn
   }
 
   enable_autoscaling       = var.enable_autoscaling
@@ -193,4 +196,13 @@ check "auth_apigw_alb_integration" {
     )
     error_message = "alb_integration = vpc_link needs alb_internal = true and certificate_arn = \"\"; origin_header needs alb_internal = false, certificate_arn and alb_origin_domain."
   }
+}
+
+# E-ticket pipeline - Shi Hui
+# SNS order-events -> SQS ticket-queue (+ DLQ); the API may publish to the topic.
+module "messaging" {
+  source = "../../modules/messaging"
+
+  name               = local.name
+  api_task_role_name = module.ecs_service.task_role_name
 }
