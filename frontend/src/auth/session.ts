@@ -10,8 +10,8 @@ export interface Session {
   userId: string;
   /** Becomes `req.user.groups`, e.g. ['organisers']. */
   groups: string[];
-  /** Cognito mode only: shown in the header instead of the sub. */
-  email?: string;
+  /** What pages show for the user: the email in cognito mode (the sub is a UUID), the user ID in dev-header mode. */
+  displayName: string;
 }
 
 export const ORGANISERS_GROUP = 'organisers';
@@ -24,7 +24,10 @@ export function loadSession(): Session | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Session;
-    return typeof parsed.userId === 'string' && Array.isArray(parsed.groups) ? parsed : null;
+    // displayName is set here, not trusted from storage: sessions saved before it existed don't have it.
+    return typeof parsed.userId === 'string' && Array.isArray(parsed.groups)
+      ? { userId: parsed.userId, groups: parsed.groups, displayName: parsed.userId }
+      : null;
   } catch {
     return null;
   }
@@ -51,7 +54,7 @@ export async function loadCognitoSession(): Promise<Session | null> {
     return {
       userId: access.payload.sub,
       groups: Array.isArray(groups) ? groups.filter((g): g is string => typeof g === 'string') : [],
-      email: typeof email === 'string' ? email : undefined,
+      displayName: typeof email === 'string' ? email : access.payload.sub,
     };
   } catch {
     return null;

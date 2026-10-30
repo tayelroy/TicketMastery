@@ -9,7 +9,7 @@ interface AuthContextValue {
   /** False until the cognito session has been checked once (avoids a /login bounce on page reload). */
   ready: boolean;
   /** Dev-header mode: store the fake session. */
-  signIn: (session: Session) => void;
+  signIn: (session: Pick<Session, 'userId' | 'groups'>) => void;
   signOut: () => void;
   /** Cognito mode: re-read the session from Amplify (call after signIn resolves, before navigating). */
   refresh: () => Promise<void>;
@@ -38,7 +38,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, [refresh]);
 
-  const signIn = useCallback((next: Session) => {
+  const signIn = useCallback(({ userId, groups }: Pick<Session, 'userId' | 'groups'>) => {
+    const next = { userId, groups, displayName: userId };
     saveSession(next);
     setSession(next);
   }, []);

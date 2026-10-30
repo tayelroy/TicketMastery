@@ -40,9 +40,9 @@ export function ConcertListPage() {
   return (
     <>
       <section className="greeting">
-        <span className="avatar large">{session ? (session.email ?? session.userId).charAt(0) : '♪'}</span>
+        <span className="avatar large">{session ? session.displayName.charAt(0) : '♪'}</span>
         <div>
-          <h1>Hello{session ? ` ${session.email ?? session.userId}` : ''}</h1>
+          <h1>Hello{session ? ` ${session.displayName}` : ''}</h1>
           <p className="muted">Find your next live night.</p>
         </div>
       </section>

@@ -28,8 +28,8 @@ export function Layout() {
           {session ? (
             <>
               <span className="user-chip">
-                <span className="avatar">{(session.email ?? session.userId).charAt(0)}</span>
-                {session.email ?? session.userId}
+                <span className="avatar">{session.displayName.charAt(0)}</span>
+                {session.displayName}
                 {session.groups.map((g) => (
                   <span key={g} className="badge">
                     {g}
