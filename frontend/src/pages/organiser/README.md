@@ -15,7 +15,8 @@
   - live sales dashboard (refreshes every 5s) once published
   - cancel with a reason (any status except cancelled/completed)
 
-Both routes need the `organisers` group (`RequireAuth`). Locally: sign in at `/login` and tick "Organiser".
+Both routes need the `organisers` group (`RequireAuth`). Locally (fake login): sign in at `/login` and tick
+"Organiser". With Cognito: an admin adds the account to the `organisers` group, then sign out and sign in again.
 
 ## API endpoints used
 

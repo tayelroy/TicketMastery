@@ -32,12 +32,12 @@ Only open port **5173** in the browser. Port 3000 is the API and only returns JS
 |---|---|---|
 | http://localhost:5173/ | Concert discovery (UC1) | public |
 | http://localhost:5173/concerts/123 | Concert detail (UC1) | public; any ID works for now |
-| http://localhost:5173/concerts/123/waiting-room | Waiting room (UC3) | public |
+| http://localhost:5173/concerts/123/waiting-room | Waiting room (UC3) | sign in |
 | http://localhost:5173/concerts/123/checkout | Checkout (UC4) | sign in |
 | http://localhost:5173/myaccount | My Tickets (UC2) | sign in |
 | http://localhost:5173/myaccount/tickets/sample-1 | One e-ticket (UC2) | sign in; sample data |
-| http://localhost:5173/organiser | Organiser dashboard (UC5) | sign in as `org-1` with "Organiser" ticked |
-| http://localhost:5173/login | Fake login | any user ID, no password |
+| http://localhost:5173/organiser | Organiser dashboard (UC5) | sign in with the `organisers` group (fake login: `org-1` with "Organiser" ticked) |
+| http://localhost:5173/login | Login | fake login by default (any user ID, no password); Cognito sign-in with `VITE_AUTH_MODE=cognito` |
 
 Pages marked "sign in" send you to `/login` first.
 
@@ -86,9 +86,12 @@ Put feature CSS in your own folder (e.g. `pages/discovery/concerts.css`) and imp
 
 ## Login
 
-Until Cognito is live, `/login` is a **fake login**: type any user ID, and tick "Organiser" if you need the organiser pages. Use `org-1` as the organiser to see the seeded demo concert. Dev only.
+`VITE_AUTH_MODE` picks one of two logins. Pages don't care which: use `useAuth()` (`session.userId`, `session.displayName`, `hasGroup()`) and `RequireAuth`, and never set auth headers yourself. All login code lives in `src/auth/`.
 
-When Cognito is ready, only `src/auth/` changes. Feature pages stay the same as long as they use `useAuth()` and `RequireAuth`, and never set the `x-dev-user-*` headers themselves.
+- **`dev-header` (default, local dev):** `/login` is a **fake login**. Type any user ID, and tick "Organiser" if you need the organiser pages. Use `org-1` as the organiser to see the seeded demo concert. The API client sends `x-dev-user-*` headers, which only a local API with `AUTH_MODE=dev-header` accepts.
+- **`cognito` (the deployed site):** `/login` is real sign-up and sign-in against the Cognito user pool (`aws-amplify`), with an email code to confirm sign-up and a "Forgot your password?" flow. The API client sends `Authorization: Bearer <access token>`. Fans sign up themselves. To become an organiser, an admin adds the account to the `organisers` group; then sign out and sign in again so the token includes it. User IDs are Cognito `sub` UUIDs, so the seeded `org-1` concert isn't visible: create a concert from the organiser page.
+
+To try Cognito locally against the dev API in AWS, set `VITE_AUTH_MODE=cognito`, the two `VITE_COGNITO_*` IDs and `VITE_DEV_API_PROXY=<api_endpoint>` (`terraform output -raw api_endpoint`) in `.env.local`.
 
 ## Configuration
 
@@ -97,11 +100,19 @@ Optional. Copy [`.env.example`](.env.example) to `.env.local` (gitignored). Thes
 | Variable | Default | Use |
 |---|---|---|
 | `VITE_API_BASE_URL` | empty | Where API calls go. Empty = same domain. Set it at build time only if the API is on another domain. |
-| `VITE_DEV_API_PROXY` | `http://localhost:3000` | Dev only: where Vite forwards `/api` and `/health`. |
+| `VITE_DEV_API_PROXY` | `http://localhost:3000` | Dev only: where Vite forwards `/api` and `/health`. Can be the API Gateway URL. |
+| `VITE_AUTH_MODE` | `dev-header` | `dev-header` (fake login) or `cognito` (real sign-in). See [Login](#login). |
+| `VITE_COGNITO_USER_POOL_ID` | empty | Cognito mode: `terraform output -raw cognito_user_pool_id`. Public ID, not a secret. |
+| `VITE_COGNITO_CLIENT_ID` | empty | Cognito mode: `terraform output -raw cognito_user_pool_client_id`. Public ID, not a secret. |
+
+In cognito mode the app stops at start-up with an error if either Cognito ID is missing.
 
 ## Deploying
 
-1. `npm ci && npm run build` (set `VITE_API_BASE_URL` if needed).
+Use the **Deploy Frontend to AWS** GitHub workflow (Actions → Run workflow, on `main`). It builds with `VITE_AUTH_MODE=cognito` and the Cognito IDs from the repository variables `COGNITO_USER_POOL_ID` and `COGNITO_CLIENT_ID` (Settings → Secrets and variables → Actions → Variables), uploads to S3 and invalidates CloudFront. It stops before uploading if either variable is empty. If the user pool is ever recreated, both IDs change: update the variables and run the workflow again.
+
+By hand, the same steps are:
+1. `npm ci && npm run build` with `VITE_AUTH_MODE=cognito` and the two `VITE_COGNITO_*` IDs set (and `VITE_API_BASE_URL` only if the API is on another domain).
 2. `aws s3 sync frontend/dist s3://<site-bucket> --delete`, then invalidate CloudFront.
 
 CloudFront needs:
