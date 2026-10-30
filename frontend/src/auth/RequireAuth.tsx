@@ -9,7 +9,7 @@ export function RequireAuth({ group, children }: { group?: string; children: Rea
   const location = useLocation();
 
   if (!ready) {
-    return <p className="muted center">Checking sign-in…</p>;
+    return <p className="muted">Checking sign-in…</p>;
   }
   if (!session) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;

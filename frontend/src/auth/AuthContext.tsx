@@ -11,8 +11,6 @@ interface AuthContextValue {
   /** Dev-header mode: store the fake session. */
   signIn: (session: Pick<Session, 'userId' | 'groups'>) => void;
   signOut: () => void;
-  /** Cognito mode: re-read the session from Amplify (call after signIn resolves, before navigating). */
-  refresh: () => Promise<void>;
   hasGroup: (group: string) => boolean;
 }
 
@@ -31,7 +29,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (AUTH_MODE !== 'cognito') return;
     void refresh();
-    // Keep the session in step with Amplify (sign-in elsewhere in the app, token refresh, sign-out).
+    // The only way the session follows Amplify: signIn/confirmSignIn fire `signedIn`, so the login page just waits
+    // for `session` to be set. A failed token refresh (e.g. refresh token revoked) counts as signed out.
     return Hub.listen('auth', ({ payload }) => {
       if (payload.event === 'signedIn' || payload.event === 'tokenRefresh') void refresh();
       if (payload.event === 'signedOut' || payload.event === 'tokenRefresh_failure') setSession(null);
@@ -60,10 +59,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ready,
       signIn,
       signOut,
-      refresh,
       hasGroup: (g) => session?.groups.includes(g) ?? false,
     }),
-    [session, ready, signIn, signOut, refresh],
+    [session, ready, signIn, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
