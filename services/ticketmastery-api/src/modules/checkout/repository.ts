@@ -244,3 +244,71 @@ export async function insertOrderItems(
     [orderId, items.map((i) => i.seatId), items.map((i) => i.ticketTypeId), items.map((i) => i.priceCents)],
   );
 }
+
+/** The concert as the checkout page shows it. No lock: read-only, outside any transaction. */
+export async function findConcertOverview(db: Queryable, concertId: string) {
+  const { rows } = await db.query<
+    ConcertSummaryRow & { status: ConcertStatus; sale_starts_at: Date; sale_ends_at: Date; sale_open: boolean }
+  >(
+    `SELECT id, title, artist, venue_name, starts_at, status, sale_starts_at, sale_ends_at,
+            (now() >= sale_starts_at AND now() < sale_ends_at) AS sale_open
+       FROM concerts
+      WHERE id = $1`,
+    [concertId],
+  );
+  return rows[0];
+}
+
+export async function findTicketTypes(db: Queryable, concertId: string) {
+  const { rows } = await db.query<{
+    id: string;
+    name: string;
+    price_cents: number;
+    currency: string;
+    max_per_order: number;
+  }>(
+    `SELECT id, name, price_cents, currency, max_per_order
+       FROM ticket_types
+      WHERE concert_id = $1
+      ORDER BY sort_order, price_cents DESC`,
+    [concertId],
+  );
+  return rows;
+}
+
+export type SeatAvailability = 'available' | 'held' | 'yours' | 'sold';
+
+export interface SeatMapRow {
+  id: string;
+  seat_number: string;
+  ticket_type_id: string;
+  section_id: string;
+  section_name: string;
+  row_id: string;
+  row_label: string;
+  availability: SeatAvailability;
+}
+
+/**
+ * Every seat of the concert in display order, with availability as this fan sees it. An expired hold counts
+ * as available (the next hold reclaims it, the same rule as holdSeats in src/db/seat-holds.ts).
+ */
+export async function findSeatMap(db: Queryable, concertId: string, fanId: string) {
+  const { rows } = await db.query<SeatMapRow>(
+    `SELECT s.id, s.seat_number, s.ticket_type_id, sec.id AS section_id, sec.name AS section_name,
+            r.id AS row_id, r.label AS row_label,
+            CASE
+              WHEN s.status = 'sold' THEN 'sold'
+              WHEN s.status = 'held' AND s.hold_expires_at > now() AND s.held_by = $2 THEN 'yours'
+              WHEN s.status = 'held' AND s.hold_expires_at > now() THEN 'held'
+              ELSE 'available'
+            END AS availability
+       FROM seats s
+       JOIN sections sec ON sec.id = s.section_id
+       JOIN rows r       ON r.id = s.row_id
+      WHERE s.concert_id = $1
+      ORDER BY sec.sort_order, sec.name, r.sort_order, r.label, length(s.seat_number), s.seat_number`,
+    [concertId, fanId],
+  );
+  return rows;
+}

@@ -401,6 +401,30 @@ describe('checkout holds (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
     assert.equal(published.mock.callCount(), 2, 'already published: no third event');
   });
 
+  test('seat map: every seat in order, availability as this fan sees it, and their active hold', async () => {
+    const { concertId, seat } = await createOnSaleConcert();
+    const mine = await checkout.createHold('fan-1', { concertId, seatIds: [seat.B1!] });
+    await checkout.createHold('fan-2', { concertId, seatIds: [seat.B2!] });
+    const sold = await checkout.createHold('fan-3', { concertId, seatIds: [seat.B3!] });
+    await checkout.confirmHold('fan-3', sold.holdId, { simulatePaymentFailure: false });
+
+    const map = await checkout.getSeatMap('fan-1', concertId);
+    assert.equal(map.concert.onSale, true);
+    assert.deepEqual(map.ticketTypes.map((t) => t.name).sort(), ['GA', 'VIP']);
+    const rowB = map.sections[0]!.rows.find((r) => r.label === 'B')!;
+    assert.deepEqual(
+      rowB.seats.map((s) => `${s.seatNumber}:${s.status}`),
+      ['1:yours', '2:held', '3:sold', '4:available', '5:available', '6:available'],
+    );
+    assert.equal(map.activeHold?.holdId, mine.holdId);
+
+    // fan-2 sees fan-1's seat as held, and has their own active hold.
+    const theirs = await checkout.getSeatMap('fan-2', concertId);
+    assert.equal(theirs.sections[0]!.rows.find((r) => r.label === 'B')!.seats[0]!.status, 'held');
+
+    await assert.rejects(checkout.getSeatMap('fan-1', randomUUID()), httpError(404, 'not_found'));
+  });
+
   test('a sold seat must name an existing order', async () => {
     const { seat } = await createOnSaleConcert();
     await assert.rejects(

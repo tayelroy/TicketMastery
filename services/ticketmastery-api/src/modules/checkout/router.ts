@@ -1,7 +1,7 @@
 import { Router, type RequestHandler } from 'express';
 import { authenticate } from '../../auth';
 import { asyncHandler, HttpError } from '../../http/errors';
-import { confirmHoldBody, createHoldBody, holdIdParams } from './schemas';
+import { concertIdParams, confirmHoldBody, createHoldBody, holdIdParams } from './schemas';
 import * as service from './service';
 
 /** UC4 Seat selection & checkout (Shi Hui). Mounted at /api/checkout. */
@@ -13,6 +13,15 @@ const requireUser: RequestHandler = (req, _res, next) => {
 };
 
 checkoutRouter.use(authenticate, requireUser);
+
+checkoutRouter.get(
+  '/concerts/:concertId/seats',
+  asyncHandler(async (req, res) => {
+    const { concertId } = concertIdParams.parse(req.params);
+    res.set('Cache-Control', 'no-store');
+    res.json(await service.getSeatMap(req.user!.sub, concertId));
+  }),
+);
 
 checkoutRouter.post(
   '/holds',

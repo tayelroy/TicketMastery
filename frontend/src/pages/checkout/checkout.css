@@ -1,0 +1,339 @@
+/* UC4 checkout styles. Shared tokens (--glass, --ink, --coral, ...) come from src/app/styles.css. */
+
+.checkout-head h1 {
+  margin: 0 0 0.35rem;
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+}
+
+.checkout-head p {
+  margin: 0;
+}
+
+.checkout-notice {
+  margin: 1.25rem 0 0;
+  padding: 0.85rem 1.2rem;
+  border-radius: 20px;
+  font-size: 0.92rem;
+}
+
+.checkout-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 1.25rem;
+  align-items: start;
+  margin-top: 1.5rem;
+}
+
+@media (max-width: 860px) {
+  .checkout-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- Steps ---------- */
+
+.checkout-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  list-style: none;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.checkout-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.checkout-steps span {
+  display: inline-grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.checkout-steps .current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.checkout-steps .current span {
+  background: #ffffff;
+  color: var(--coral);
+}
+
+.checkout-steps .done span {
+  background: var(--glass-strong);
+  color: var(--text);
+}
+
+/* ---------- Seat map ---------- */
+
+.seat-map {
+  overflow-x: auto;
+}
+
+.stage {
+  margin: 0 auto 1.5rem;
+  max-width: 60%;
+  padding: 0.45rem;
+  border-radius: 0 0 40px 40px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}
+
+.seat-section h3 {
+  margin: 1rem 0 0.6rem;
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+.seat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.row-label {
+  flex: none;
+  width: 1.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Overrides the shared pill button. */
+.seat {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 10px 10px 6px 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  box-shadow: none;
+  color: var(--ink);
+  border: 2px solid transparent;
+}
+
+.seat:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+/* Ticket type colours (available seats). */
+.seat.tt-0 {
+  background: #ffffff;
+}
+.seat.tt-1 {
+  background: #ffd9cf;
+}
+.seat.tt-2 {
+  background: #cfeef0;
+}
+.seat.tt-3 {
+  background: #f3e7b5;
+}
+
+.seat.available:not(:disabled):hover {
+  border-color: var(--ink);
+}
+
+.seat.selected {
+  background: var(--coral);
+  color: #ffffff;
+  border-color: #ffffff;
+}
+
+.seat.yours {
+  background: var(--coral);
+  color: #ffffff;
+}
+
+.seat.held,
+.seat.sold {
+  background: rgba(255, 255, 255, 0.18);
+  color: transparent;
+}
+
+.seat:disabled {
+  cursor: default;
+}
+
+.seat-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.25rem;
+  margin-top: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.seat-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.seat-legend .seat {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 4px;
+}
+
+/* ---------- Checkout step ---------- */
+
+/* Centred in the content column, like the confirmation card. */
+.checkout-step {
+  max-width: 640px;
+  margin: 1.5rem auto 0;
+}
+
+.checkout-step h2 {
+  margin: 1.75rem 0 0.5rem;
+  font-size: 1.2rem;
+}
+
+.checkout-timer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 1rem;
+  border-radius: 22px;
+  background: var(--glass-dark);
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.checkout-timer strong {
+  font-size: 2.4rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.checkout-timer.expired strong {
+  font-size: 1.3rem;
+  color: var(--bad);
+}
+
+/* ---------- Summary ---------- */
+
+.checkout-summary {
+  position: sticky;
+  top: 6rem;
+}
+
+.checkout-summary > button {
+  width: 100%;
+  margin-top: 1rem;
+}
+
+.order-lines {
+  list-style: none;
+  margin: 0.75rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.order-lines li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.order-lines small {
+  display: block;
+  color: var(--muted);
+}
+
+.totals {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 1rem;
+  margin: 1rem 0 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--glass-border);
+  font-size: 0.92rem;
+}
+
+.totals dt,
+.totals dd {
+  margin: 0;
+}
+
+.totals dt small {
+  color: var(--muted);
+}
+
+.totals dd {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.totals .total {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.checkout-done {
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.checkout-done h1 {
+  margin: 0 0 0.35rem;
+}
+
+/* ---------- Reservation timeout popup ---------- */
+
+/* Native <dialog> opened with showModal(): the browser centres it and puts it above the page. */
+.checkout-dialog {
+  max-width: min(420px, calc(100% - 2rem));
+  padding: 1.75rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: #ffffff;
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.checkout-dialog::backdrop {
+  background: rgba(22, 28, 32, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.checkout-dialog h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.4rem;
+  color: var(--coral);
+}
+
+.checkout-dialog p {
+  margin: 0 0 0.75rem;
+  color: var(--ink-muted);
+}
+
+.checkout-dialog button {
+  margin-top: 0.5rem;
+  background: var(--coral);
+  color: #ffffff;
+}

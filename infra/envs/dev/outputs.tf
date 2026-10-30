@@ -196,3 +196,22 @@ output "api_access_log_group_name" {
   description = "CloudWatch log group with API Gateway access logs."
   value       = module.auth_apigw.access_log_group_name
 }
+
+################################################################################
+# Messaging (e-ticket pipeline)
+################################################################################
+
+output "order_events_topic_arn" {
+  description = "SNS order-events topic ARN; the API publishes OrderConfirmed (UC4) and ConcertCancelled (UC5) here."
+  value       = module.messaging.order_events_topic_arn
+}
+
+output "ticket_queue_arn" {
+  description = "SQS ticket-queue ARN; event source for the ticket-fn Lambda."
+  value       = module.messaging.ticket_queue_arn
+}
+
+output "ticket_dlq_url" {
+  description = "SQS ticket-dlq URL; e-tickets that failed 5 times wait here for inspection."
+  value       = module.messaging.ticket_dlq_url
+}
