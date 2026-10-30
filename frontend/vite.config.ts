@@ -11,8 +11,10 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       proxy: {
-        '/api': apiTarget,
-        '/health': apiTarget,
+        // changeOrigin sends the target's own Host header, so API Gateway accepts the request (it rejects
+        // Host: localhost with 403). Harmless for the default http://localhost:3000.
+        '/api': { target: apiTarget, changeOrigin: true },
+        '/health': { target: apiTarget, changeOrigin: true },
       },
     },
     build: {

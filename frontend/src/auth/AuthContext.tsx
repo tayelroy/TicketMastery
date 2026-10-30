@@ -1,9 +1,15 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import { loadSession, saveSession, type Session } from './session';
+import { signOut as amplifySignOut } from 'aws-amplify/auth';
+import { Hub } from 'aws-amplify/utils';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AUTH_MODE } from './amplify';
+import { loadCognitoSession, loadSession, saveSession, type Session } from './session';
 
 interface AuthContextValue {
   session: Session | null;
-  signIn: (session: Session) => void;
+  /** False until the cognito session has been checked once (avoids a /login bounce on page reload). */
+  ready: boolean;
+  /** Dev-header mode: store the fake session. */
+  signIn: (session: Pick<Session, 'userId' | 'groups'>) => void;
   signOut: () => void;
   hasGroup: (group: string) => boolean;
 }
@@ -11,21 +17,51 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(() => loadSession());
+  const [session, setSession] = useState<Session | null>(() => (AUTH_MODE === 'dev-header' ? loadSession() : null));
+  const [ready, setReady] = useState(AUTH_MODE === 'dev-header');
 
-  const signIn = useCallback((next: Session) => {
+  const refresh = useCallback(async () => {
+    if (AUTH_MODE !== 'cognito') return;
+    setSession(await loadCognitoSession());
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (AUTH_MODE !== 'cognito') return;
+    void refresh();
+    // The only way the session follows Amplify: signIn/confirmSignIn fire `signedIn`, so the login page just waits
+    // for `session` to be set. A failed token refresh (e.g. refresh token revoked) counts as signed out.
+    return Hub.listen('auth', ({ payload }) => {
+      if (payload.event === 'signedIn' || payload.event === 'tokenRefresh') void refresh();
+      if (payload.event === 'signedOut' || payload.event === 'tokenRefresh_failure') setSession(null);
+    });
+  }, [refresh]);
+
+  const signIn = useCallback(({ userId, groups }: Pick<Session, 'userId' | 'groups'>) => {
+    const next = { userId, groups, displayName: userId };
     saveSession(next);
     setSession(next);
   }, []);
 
   const signOut = useCallback(() => {
-    saveSession(null);
+    if (AUTH_MODE === 'cognito') {
+      // Also revokes the refresh token (enable_token_revocation on the app client).
+      void amplifySignOut();
+    } else {
+      saveSession(null);
+    }
     setSession(null);
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ session, signIn, signOut, hasGroup: (g) => session?.groups.includes(g) ?? false }),
-    [session, signIn, signOut],
+    () => ({
+      session,
+      ready,
+      signIn,
+      signOut,
+      hasGroup: (g) => session?.groups.includes(g) ?? false,
+    }),
+    [session, ready, signIn, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

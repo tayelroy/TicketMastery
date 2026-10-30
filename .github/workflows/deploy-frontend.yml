@@ -30,7 +30,21 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
-        run: npm run build
+        env:
+          # Real Cognito sign-in. The IDs are public identifiers (repository variables, not secrets),
+          # set from `terraform output -raw cognito_user_pool_id` / `cognito_user_pool_client_id`.
+          VITE_AUTH_MODE: cognito
+          VITE_COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID }}
+          VITE_COGNITO_CLIENT_ID: ${{ vars.COGNITO_CLIENT_ID }}
+          # Empty on purpose: the browser calls /api on the CloudFront domain, so no CORS is needed.
+          VITE_API_BASE_URL: ""
+        run: |
+          # Without the IDs the build still succeeds, but the site would fail on load: stop before uploading.
+          if [ -z "$VITE_COGNITO_USER_POOL_ID" ] || [ -z "$VITE_COGNITO_CLIENT_ID" ]; then
+            echo "::error::Set repository variables COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID (Settings → Secrets and variables → Actions → Variables)"
+            exit 1
+          fi
+          npm run build
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
