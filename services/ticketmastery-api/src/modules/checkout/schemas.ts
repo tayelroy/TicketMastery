@@ -16,6 +16,7 @@ export const createHoldBody = z
 export type CreateHoldInput = z.infer<typeof createHoldBody>;
 
 export const holdIdParams = z.object({ holdId: z.uuid() });
+export const concertIdParams = z.object({ concertId: z.uuid() });
 
 /** Payment is simulated. `simulatePaymentFailure` lets the demo show the failed-payment path. */
 export const confirmHoldBody = z

@@ -11,7 +11,15 @@ import { HttpError } from '../../http/errors';
 import { isAdmitted } from './admission';
 import { type OrderConfirmedEvent, orderEvents } from './events';
 import * as repo from './repository';
-import type { ConcertStatus, ConcertSummaryRow, OrderRow, OrderSeatRow, SeatForHoldRow } from './repository';
+import type {
+  ConcertStatus,
+  ConcertSummaryRow,
+  OrderRow,
+  OrderSeatRow,
+  SeatAvailability,
+  SeatForHoldRow,
+  SeatMapRow,
+} from './repository';
 import type { ConfirmHoldInput, CreateHoldInput } from './schemas';
 
 /**
@@ -302,4 +310,74 @@ export async function confirmHold(fanId: string, holdId: string, input: ConfirmH
     await repo.markPublished(pool, outcome.event.orderId);
   }
   return outcome.dto;
+}
+
+interface SeatMapSection {
+  id: string;
+  name: string;
+  rows: {
+    id: string;
+    label: string;
+    seats: { id: string; seatNumber: string; ticketTypeId: string; status: SeatAvailability }[];
+  }[];
+}
+
+/** Rows arrive sorted by section then row, so consecutive rows are grouped without lookups. */
+function groupSeats(seats: SeatMapRow[]) {
+  const sections: SeatMapSection[] = [];
+  for (const s of seats) {
+    let section = sections.at(-1);
+    if (section?.id !== s.section_id) {
+      section = { id: s.section_id, name: s.section_name, rows: [] };
+      sections.push(section);
+    }
+    let row = section.rows.at(-1);
+    if (row?.id !== s.row_id) {
+      row = { id: s.row_id, label: s.row_label, seats: [] };
+      section.rows.push(row);
+    }
+    row.seats.push({ id: s.id, seatNumber: s.seat_number, ticketTypeId: s.ticket_type_id, status: s.availability });
+  }
+  return sections;
+}
+
+/**
+ * What the checkout page needs in one call: the concert, its ticket types, every seat (grouped by section and
+ * row, with availability as this fan sees it) and the fan's active hold, so a page refresh keeps the countdown.
+ * Draft concerts are not public, so they are 404 like a missing one.
+ * TODO(Shi Hui): switch the page to UC1's seat map once `/api/concerts` has one.
+ */
+export async function getSeatMap(fanId: string, concertId: string) {
+  const concert = await repo.findConcertOverview(pool, concertId);
+  if (!concert || concert.status === 'draft') {
+    throw new HttpError(404, 'not_found', 'Concert not found');
+  }
+  const [ticketTypes, seats, pending] = await Promise.all([
+    repo.findTicketTypes(pool, concertId),
+    repo.findSeatMap(pool, concertId, fanId),
+    repo.findActivePendingOrder(pool, fanId, concertId),
+  ]);
+  return {
+    concert: {
+      id: concert.id,
+      title: concert.title,
+      artist: concert.artist,
+      venueName: concert.venue_name,
+      startsAt: concert.starts_at,
+      status: concert.status,
+      saleStartsAt: concert.sale_starts_at,
+      saleEndsAt: concert.sale_ends_at,
+      onSale: SELLABLE_STATUSES.has(concert.status) && concert.sale_open,
+    },
+    bookingFeeCentsPerSeat: BOOKING_FEE_CENTS_PER_SEAT,
+    ticketTypes: ticketTypes.map((t) => ({
+      id: t.id,
+      name: t.name,
+      priceCents: t.price_cents,
+      currency: t.currency,
+      maxPerOrder: t.max_per_order,
+    })),
+    sections: groupSeats(seats),
+    activeHold: pending ? toHoldDto(pending, await repo.findOrderSeats(pool, pending.id)) : null,
+  };
 }
