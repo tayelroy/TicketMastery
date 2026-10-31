@@ -15,7 +15,7 @@ Infrastructure for a function (function, role, triggers, queues) belongs in its 
 | Folder | Owner | Use case | Trigger → effect | Status |
 |---|---|---|---|---|
 | `queue-manager/` | Yan Ting | UC3 virtual waiting room | EventBridge Scheduler (every minute during the sale window) → reads SQS FIFO `join-queue` → admits up to 500 fans per run into DynamoDB `live-queue` | planned |
-| `ticket-fn/` | Shi Hui | UC4 e-tickets | SNS `order-events` → SQS `ticket-queue` (DLQ `ticket-dlq` after 5 tries) → renders the PDF to S3 and emails it via SES | planned; **name is an open question** (`ticket-fn` vs `ticket-worker`) |
+| `ticket-fn/` | Shi Hui | UC4 e-tickets | SNS `order-events` → SQS `ticket-queue` (DLQ `ticket-dlq` after 5 tries) → renders the PDF to S3 at `tickets/<orderId>.pdf` (UC2's download link reads that key, see [account](../services/ticketmastery-api/src/modules/account/README.md#download-link)) and emails it via SES | planned; **name is an open question** (`ticket-fn` vs `ticket-worker`) |
 | `hold-sweeper/` (optional) | TBC (Yan Ting / Shi Hui) | UC3/UC4 | Scheduled → frees expired seat holds / waiting-room slots | **open question**, see below |
 
 ### Open questions

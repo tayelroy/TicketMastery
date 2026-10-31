@@ -12,6 +12,12 @@
   font-size: 0.92rem;
 }
 
+.tickets-subheading {
+  margin: 1.75rem 0 0.85rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
 .ticket-list {
   display: grid;
   gap: 1rem;
@@ -66,6 +72,11 @@
 
 .ticket-row-info small {
   color: var(--muted);
+}
+
+.ticket-badge {
+  align-self: flex-start;
+  margin-top: 0.35rem;
 }
 
 .ticket-row-cta {
@@ -211,6 +222,30 @@
   text-align: right;
 }
 
+.eticket-details .wide {
+  grid-column: 1 / -1;
+}
+
+.eticket-seats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.eticket-seats li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.eticket-seat-type {
+  color: var(--ink-muted);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
 .eticket-barcode {
   height: 72px;
   background: repeating-linear-gradient(
@@ -233,6 +268,10 @@
   margin-top: 1.25rem;
 }
 
+.ticket-actions.single {
+  grid-template-columns: 1fr;
+}
+
 .ticket-actions button {
   padding: 0.95rem 1rem;
 }
@@ -251,4 +290,18 @@
 
 .center {
   text-align: center;
+}
+
+/* ---------- Profile ---------- */
+
+.profile-card {
+  max-width: 720px;
+  margin-top: 2rem;
+  padding: 1.25rem 1.5rem;
+  border-radius: 28px;
+}
+
+.profile-card h2 {
+  margin: 0;
+  font-size: 1.15rem;
 }

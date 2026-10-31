@@ -21,8 +21,10 @@
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1157.0",
+    "@aws-sdk/client-s3": "^3.1161.0",
     "@aws-sdk/client-sns": "^3.1156.0",
     "@aws-sdk/client-sqs": "^3.1157.0",
+    "@aws-sdk/s3-request-presigner": "^3.1161.0",
     "aws-jwt-verify": "^5.2.1",
     "express": "^4.22.3",
     "pg": "^8.23.1",
