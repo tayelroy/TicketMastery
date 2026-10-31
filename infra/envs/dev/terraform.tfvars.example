@@ -27,6 +27,10 @@ alb_internal        = true       # internal ALB with vpc_link (+ alb_ingress_cid
 alb_origin_domain   = ""         # origin_header only, e.g. "origin.example.com"
 waiting_room_public = false      # true = guests can join the waiting room without signing in
 
+# E-tickets (Shi Hui). SES sandbox: both addresses must be verified identities in SES.
+ses_sender_email                = "" # e.g. "you@example.com"; empty = ticket-fn can't send (terraform warns)
+ticket_fallback_recipient_email = "" # testing only: gets e-tickets for dev-header fans (no Cognito user)
+
 # API service
 image_tag                     = "latest"
 container_port                = 3000

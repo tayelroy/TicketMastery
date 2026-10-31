@@ -1,5 +1,5 @@
 # UC4 e-ticket pipeline (Shi Hui):
-#   API --publish--> SNS order-events --> SQS ticket-queue --> ticket-fn Lambda (later PR)
+#   API --publish--> SNS order-events --> SQS ticket-queue --> ticket-fn Lambda (ticket_fn.tf) --> S3 + SES
 #                                              |
 #                                              +-- after max_receive_count failures --> SQS ticket-dlq
 # The API publishes OrderConfirmed (UC4) and, later, ConcertCancelled (UC5) to the same topic.

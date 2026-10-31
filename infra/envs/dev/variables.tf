@@ -256,3 +256,19 @@ variable "waiting_room_public" {
   type        = bool
   default     = false
 }
+
+################################################################################
+# E-tickets (Shi Hui)
+################################################################################
+
+variable "ses_sender_email" {
+  description = "SES-verified address the ticket-fn emails come from (SES sandbox: recipients must be verified too)."
+  type        = string
+  default     = ""
+}
+
+variable "ticket_fallback_recipient_email" {
+  description = "Testing only: SES-verified address that gets e-tickets for fans with no Cognito user (auth_mode = dev-header ids like fan-1). Empty = none."
+  type        = string
+  default     = ""
+}

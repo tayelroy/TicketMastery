@@ -199,10 +199,23 @@ check "auth_apigw_alb_integration" {
 }
 
 # E-ticket pipeline - Shi Hui
-# SNS order-events -> SQS ticket-queue (+ DLQ); the API may publish to the topic.
+# SNS order-events -> SQS ticket-queue (+ DLQ) -> ticket-fn Lambda -> S3 e-tickets + SES email.
 module "messaging" {
   source = "../../modules/messaging"
 
   name               = local.name
   api_task_role_name = module.ecs_service.task_role_name
+
+  cognito_user_pool_id     = module.auth_apigw.user_pool_id
+  cognito_user_pool_arn    = module.auth_apigw.user_pool_arn
+  ses_sender_email         = var.ses_sender_email
+  fallback_recipient_email = var.ticket_fallback_recipient_email
+}
+
+# Warning only. Without a verified sender ticket-fn can't email anyone: every e-ticket retries, then lands in the DLQ.
+check "ticket_fn_sender" {
+  assert {
+    condition     = var.ses_sender_email != ""
+    error_message = "ses_sender_email is empty: ticket-fn cannot send e-tickets. Set it to an SES-verified address in terraform.tfvars."
+  }
 }

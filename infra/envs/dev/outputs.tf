@@ -215,3 +215,13 @@ output "ticket_dlq_url" {
   description = "SQS ticket-dlq URL; e-tickets that failed 5 times wait here for inspection."
   value       = module.messaging.ticket_dlq_url
 }
+
+output "ticket_bucket_name" {
+  description = "Private S3 bucket with e-ticket PDFs (tickets/<orderId>.pdf)."
+  value       = module.messaging.ticket_bucket_name
+}
+
+output "ticket_fn_name" {
+  description = "ticket-fn Lambda; logs: aws logs tail /aws/lambda/<name> --follow."
+  value       = module.messaging.ticket_fn_name
+}
