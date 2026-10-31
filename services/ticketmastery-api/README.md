@@ -39,7 +39,7 @@ npm run dev                        # tsx watch, loads .env
 | `npm run seed` / `npm run seed:prod` | idempotent demo seed (tsx + `.env` / compiled) |
 | `npm run typecheck` | `tsc --noEmit` over `src/` and `test/` |
 | `npm test` | all tests; the Postgres ones skip without `DB_HOST` (see below) |
-| `npm run test:coverage` | same tests on the `tsc` build, with c8; fails below 100% for `src/auth` and `src/config.ts` |
+| `npm run test:coverage` | same tests on the `tsc` build, with c8; fails below 100% for `src/auth`, `src/config.ts` and `src/modules/account` |
 
 ### Tests
 
@@ -109,7 +109,7 @@ conflict -> 409.
 | Path | Module | Use case | Owner | Status |
 |---|---|---|---|---|
 | `/api/concerts` | `discovery` | UC1 Concert discovery | Cody & Nai Xin | stub (501) |
-| `/api/me` | `account` | UC2 My Tickets & Account | Andrew | stub (501) |
+| `/api/me` | `account` | UC2 My Tickets & Account | Andrew | implemented (profile, orders, e-ticket download link) |
 | `/api/waiting-room` | `waiting-room` | UC3 Virtual waiting room | Yan Ting | stub (501) |
 | `/api/checkout` | `checkout` | UC4 Seat selection & checkout | Shi Hui | implemented (hold, release, confirm) |
 | `/api/organiser` | `organiser` | UC5 Concert & ticket management | Elroy | implemented |
@@ -153,6 +153,7 @@ Validated with zod at startup (`src/config.ts`); invalid config exits with a lis
 | `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID` | unset | required with `AUTH_MODE=cognito`; Terraform sets them from `module.auth_apigw` |
 | `RUN_MIGRATIONS_ON_START` | `false` | migrate (advisory-locked) before listening |
 | `ORDER_EVENTS_TOPIC_ARN` | unset | UC4: SNS `order-events` topic for `OrderConfirmed`; unset = event only logged |
+| `TICKET_PDF_BUCKET` | unset | UC2: private S3 bucket with the e-ticket PDFs (UC4's); unset = downloads answer `503` |
 
 ### AWS notes
 
