@@ -155,8 +155,8 @@ export function WaitingRoomPage() {
 
       {queue.mode === 'demo' && (
         <p className="wr-demo">
-          <strong>Demo mode.</strong> <code>/api/waiting-room</code> isn't built yet, so this queue is simulated in your
-          browser and starts moving straight away.
+          <strong>Demo mode.</strong> <code>/api/waiting-room</code> isn't configured on this server, so this queue is
+          simulated in your browser and starts moving straight away.
         </p>
       )}
 
@@ -167,7 +167,7 @@ export function WaitingRoomPage() {
             <strong>Keep this tab open.</strong> Your place is tied to your account, so refreshing won't lose it.
           </li>
           <li>
-            <strong>Be ready.</strong> When it's your turn you'll have 10 minutes to choose seats and check out.
+            <strong>Be ready.</strong> When it's your turn you'll have 15 minutes to choose your seats.
           </li>
         </ul>
       </section>
@@ -195,12 +195,13 @@ function QueuePanel({ concertId, queue, now }: { concertId: string; queue: Retur
 
   if (status.state === 'pending') return <Joining label="Assigning your queue number…" />;
 
-  if (status.state === 'admitted') {
-    const left = Math.max(0, Date.parse(status.admittedUntil ?? '') - now);
+  const left = status.state === 'admitted' ? Date.parse(status.admittedUntil ?? '') - now : 0;
+
+  if (status.state === 'admitted' && left > 0) {
     return (
       <div className="wr-panel wr-admitted">
         <p className="wr-label">Queue number #{count(status.position ?? 0)}</p>
-        <p className="wr-title">It's your turn!</p>
+        <p className="wr-title">You're in!</p>
         <p className="muted">
           Your spot is held for <strong className="wr-countdown">{clock(left)}</strong>. Choose your seats before it runs out.
         </p>
@@ -211,11 +212,12 @@ function QueuePanel({ concertId, queue, now }: { concertId: string; queue: Retur
     );
   }
 
-  if (status.state === 'expired') {
+  // Polling stops once admitted, so the countdown reaching zero here is what ends the turn on screen.
+  if (status.state === 'expired' || status.state === 'admitted') {
     return (
       <div className="wr-panel">
         <p className="wr-title">Your turn has expired</p>
-        <p className="muted">You didn't start checkout within 10 minutes, so your spot went to the next fan.</p>
+        <p className="muted">You didn't choose your seats within 15 minutes, so your spot went to the next fan.</p>
         <button type="button" onClick={rejoin}>
           Rejoin the queue
         </button>

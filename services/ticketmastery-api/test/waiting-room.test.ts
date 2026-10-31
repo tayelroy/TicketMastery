@@ -9,19 +9,26 @@ import { toQueueStatus } from '../src/modules/waiting-room/status';
 
 const CONCERT = '7b1841b9-a076-4469-8a95-1ea37e01fe03';
 const noneAdmitted = { lastPosition: 0, admittedUpTo: 0 };
+const SALE = { startsAt: new Date(1_800_000_000_000), endsAt: new Date(1_800_086_400_999) };
 
 describe('joinMessage', () => {
   test('body matches what queue-manager reads, grouped per concert', () => {
-    const msg = joinMessage(CONCERT, 'fan-1', 1_800_000_000_500);
-    assert.deepEqual(JSON.parse(msg.MessageBody), { eventId: CONCERT, userId: 'fan-1', joinedAt: 1_800_000_000 });
+    const msg = joinMessage(CONCERT, 'fan-1', SALE, 1_800_000_000_500);
+    assert.deepEqual(JSON.parse(msg.MessageBody), {
+      eventId: CONCERT,
+      userId: 'fan-1',
+      joinedAt: 1_800_000_000,
+      saleStartsAt: 1_800_000_000,
+      saleEndsAt: 1_800_086_400,
+    });
     assert.equal(msg.MessageGroupId, CONCERT);
   });
 
   test('dedup id is stable per fan + concert and within the 128-char limit', () => {
-    const a = joinMessage(CONCERT, 'fan-1').MessageDeduplicationId;
-    assert.equal(a, joinMessage(CONCERT, 'fan-1', 0).MessageDeduplicationId);
-    assert.notEqual(a, joinMessage(CONCERT, 'fan-2').MessageDeduplicationId);
-    assert.ok(joinMessage(CONCERT, 'x'.repeat(500)).MessageDeduplicationId.length <= 128);
+    const a = joinMessage(CONCERT, 'fan-1', SALE).MessageDeduplicationId;
+    assert.equal(a, joinMessage(CONCERT, 'fan-1', SALE, 0).MessageDeduplicationId);
+    assert.notEqual(a, joinMessage(CONCERT, 'fan-2', SALE).MessageDeduplicationId);
+    assert.ok(joinMessage(CONCERT, 'x'.repeat(500), SALE).MessageDeduplicationId.length <= 128);
   });
 });
 

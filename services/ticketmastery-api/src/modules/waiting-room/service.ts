@@ -39,6 +39,6 @@ export async function join(userId: string, concertId: string): Promise<QueueStat
   const current = await getStatus(userId, concertId);
   if (current.state === 'waiting' || current.state === 'admitted') return current;
 
-  await waitingRoomQueue.sendJoin(concertId, userId);
+  await waitingRoomQueue.sendJoin(concertId, userId, { startsAt: concert.sale_starts_at, endsAt: concert.sale_ends_at });
   return { ...current, state: 'pending', position: null, peopleAhead: null, admittedUntil: null };
 }

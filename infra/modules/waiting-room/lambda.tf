@@ -24,8 +24,10 @@ resource "aws_lambda_function" "queue_manager" {
 
   environment {
     variables = {
-      TABLE_NAME          = aws_dynamodb_table.live_queue.name
-      WAITING_TTL_SECONDS = tostring(var.waiting_ttl_seconds)
+      TABLE_NAME               = aws_dynamodb_table.live_queue.name
+      WAITING_TTL_SECONDS      = tostring(var.waiting_ttl_seconds)
+      ADMIT_BATCH_SIZE         = tostring(var.admit_batch_size)
+      ADMISSION_WINDOW_SECONDS = tostring(var.admission_window_seconds)
     }
   }
 

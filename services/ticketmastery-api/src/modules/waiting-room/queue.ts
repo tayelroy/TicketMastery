@@ -20,6 +20,17 @@ export interface JoinMessage {
   userId: string;
   /** Epoch seconds. */
   joinedAt: number;
+  /**
+   * The concert's sale window, epoch seconds. queue-manager has no database access, so it keeps these on the
+   * concert's `#COUNTER` row and admits nobody outside the window.
+   */
+  saleStartsAt: number;
+  saleEndsAt: number;
+}
+
+export interface SaleWindow {
+  startsAt: Date;
+  endsAt: Date;
 }
 
 /** The fields of a fan's `live-queue` row (PK eventId, SK userId) that the API reads. */
@@ -36,8 +47,16 @@ export interface QueueCounter {
   admittedUpTo: number;
 }
 
-export function joinMessage(concertId: string, userId: string, now = Date.now()) {
-  const body: JoinMessage = { eventId: concertId, userId, joinedAt: Math.floor(now / 1000) };
+const epochSeconds = (ms: number) => Math.floor(ms / 1000);
+
+export function joinMessage(concertId: string, userId: string, sale: SaleWindow, now = Date.now()) {
+  const body: JoinMessage = {
+    eventId: concertId,
+    userId,
+    joinedAt: epochSeconds(now),
+    saleStartsAt: epochSeconds(sale.startsAt.getTime()),
+    saleEndsAt: epochSeconds(sale.endsAt.getTime()),
+  };
   return {
     MessageBody: JSON.stringify(body),
     // One message group per concert: SQS hands queue-manager each concert's joins in arrival order,
@@ -64,8 +83,13 @@ export const waitingRoomQueue = {
     return Boolean(sqs && dynamo);
   },
 
-  async sendJoin(concertId: string, userId: string): Promise<void> {
-    await sqs!.send(new SendMessageCommand({ QueueUrl: JOIN_QUEUE_URL, ...joinMessage(concertId, userId) }));
+  /** False when WAITING_ROOM_TABLE_NAME is unset; checkout then admits everyone (see checkout/admission.ts). */
+  hasTable(): boolean {
+    return Boolean(dynamo);
+  },
+
+  async sendJoin(concertId: string, userId: string, sale: SaleWindow): Promise<void> {
+    await sqs!.send(new SendMessageCommand({ QueueUrl: JOIN_QUEUE_URL, ...joinMessage(concertId, userId, sale) }));
   },
 
   async getEntry(concertId: string, userId: string): Promise<QueueEntry | undefined> {

@@ -1,4 +1,4 @@
-/** Response shapes for UC3. The waiting-room API is still a stub, so QueueStatus is the planned contract. */
+/** Response shapes for UC3, as returned by the waiting-room API module. */
 
 /** The fields this page needs from GET /api/concerts/:id. */
 export interface Concert {

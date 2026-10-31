@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError } from '../../api/client';
 import { formatConcertDate, formatMoney, type Hold, type SeatMap } from './types';
 import './checkout.css';
@@ -21,7 +21,6 @@ const ERROR_TEXT: Record<string, string> = {
   seats_unavailable: 'Some of those seats were just taken. The seat map has been refreshed, please select again.',
   active_hold_exists: 'You already have seats reserved for this concert.',
   not_on_sale: 'Tickets for this concert are not on sale right now.',
-  not_admitted: 'You need to go through the waiting room first.',
   too_many_seats: 'That is more seats of one ticket type than a single order allows.',
   hold_cancelled: 'That reservation was already cancelled. Please select your seats again.',
   payment_failed: 'Payment was declined and your seats were released. Please select again.',
@@ -58,6 +57,7 @@ function formatCountdown(ms: number): string {
 
 export function CheckoutPage() {
   const { concertId = '' } = useParams();
+  const navigate = useNavigate();
   const [map, setMap] = useState<SeatMap | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
@@ -165,7 +165,10 @@ export function CheckoutPage() {
     try {
       await action();
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'hold_expired') {
+      if (err instanceof ApiError && err.code === 'not_admitted') {
+        // Not let in yet (or the admission ran out): the waiting room joins the queue or shows the fan's place.
+        navigate(`/concerts/${encodeURIComponent(concertId)}/waiting-room`);
+      } else if (err instanceof ApiError && err.code === 'hold_expired') {
         setTimedOut(true);
         await load();
       } else if (err instanceof ApiError) {
