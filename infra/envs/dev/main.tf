@@ -171,6 +171,7 @@ module "waiting_room" {
   admit_schedule_enabled    = var.admit_schedule_enabled
   admit_schedule_start_date = var.admit_schedule_start_date
   admit_schedule_end_date   = var.admit_schedule_end_date
+  admit_batch_size          = var.admit_batch_size
 }
 
 # Auth (Cognito) + API Gateway - Andrew

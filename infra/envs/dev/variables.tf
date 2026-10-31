@@ -281,6 +281,12 @@ variable "admit_schedule_end_date" {
   default     = null
 }
 
+variable "admit_batch_size" {
+  description = "UC3: fans admitted per concert per admit run (once a minute)."
+  type        = number
+  default     = 500
+}
+
 variable "contact_email" {
   description = "Team contact: SES sender of the e-ticket emails (must be verified), alert emails and AWS Budgets notifications."
   type        = string
