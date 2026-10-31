@@ -35,7 +35,7 @@ Only open port **5173** in the browser. Port 3000 is the API and only returns JS
 | http://localhost:5173/concerts/123/waiting-room | Waiting room (UC3) | sign in |
 | http://localhost:5173/concerts/123/checkout | Checkout (UC4) | sign in |
 | http://localhost:5173/myaccount | My Tickets (UC2) | sign in |
-| http://localhost:5173/myaccount/tickets/sample-1 | One e-ticket (UC2) | sign in; sample data |
+| http://localhost:5173/myaccount/tickets/:orderId | One e-ticket (UC2) | sign in; open it from My Tickets |
 | http://localhost:5173/organiser | Organiser dashboard (UC5) | sign in with the `organisers` group (fake login: `org-1` with "Organiser" ticked) |
 | http://localhost:5173/login | Login | fake login by default (any user ID, no password); Cognito sign-in with `VITE_AUTH_MODE=cognito` |
 
@@ -82,7 +82,7 @@ The theme is in `src/app/styles.css`. Reuse it before writing your own:
 
 Put feature CSS in your own folder (e.g. `pages/discovery/concerts.css`) and import it from your page.
 
-**Sample data:** until their APIs exist, the concert list shows one labelled sample card, and My Tickets shows one sample ticket from `pages/account/sampleTickets.ts`. Delete the sample once the real API works. Cards without an image show an empty box.
+Cards and tickets without an image show an empty box.
 
 ## Login
 
