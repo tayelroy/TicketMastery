@@ -1,3 +1,4 @@
+import { Navigate } from 'react-router-dom';
 import { RequireAuth } from '../../auth/RequireAuth';
 import type { FeatureRegistration } from '../../features';
 import { MyTicketsPage } from './MyTicketsPage';
@@ -13,6 +14,8 @@ export const accountFeature: FeatureRegistration = {
         </RequireAuth>
       ),
     },
+    // The checkout confirmation links here; the list lives at /myaccount.
+    { path: '/myaccount/tickets', element: <Navigate to="/myaccount" replace /> },
     {
       path: '/myaccount/tickets/:ticketId',
       element: (
