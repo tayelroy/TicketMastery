@@ -153,7 +153,7 @@ Validated with zod at startup (`src/config.ts`); invalid config exits with a lis
 | `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID` | unset | required with `AUTH_MODE=cognito`; Terraform sets them from `module.auth_apigw` |
 | `RUN_MIGRATIONS_ON_START` | `false` | migrate (advisory-locked) before listening |
 | `ORDER_EVENTS_TOPIC_ARN` | unset | UC4: SNS `order-events` topic for `OrderConfirmed`; unset = event only logged |
-| `TICKET_PDF_BUCKET` | unset | UC2: private S3 bucket with the e-ticket PDFs (UC4's); unset = downloads answer `503` |
+| `TICKET_PDF_BUCKET` | unset | UC2: private S3 bucket with the e-ticket PDFs (UC4's; the API needs `s3:GetObject` + `s3:ListBucket`); unset = downloads answer `503` |
 
 ### AWS notes
 

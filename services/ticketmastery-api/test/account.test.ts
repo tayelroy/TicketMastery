@@ -5,11 +5,12 @@
  * Needs a real Postgres, like checkout.test.ts: skipped when DB_HOST is unset, and everything runs in a throwaway
  * schema that is dropped at the end.
  */
+import { S3Client } from '@aws-sdk/client-s3';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { after, before, describe, test } from 'node:test';
+import { after, before, describe, mock, test } from 'node:test';
 import type * as PoolModule from '../src/db/pool';
 import type * as CheckoutServiceModule from '../src/modules/checkout/service';
 import type * as OrganiserServiceModule from '../src/modules/organiser/service';
@@ -101,6 +102,8 @@ describe('UC2 my tickets (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
     });
     delete process.env.AWS_PROFILE; // with it set, the SDK skips the key variables above
     delete process.env.AWS_SESSION_TOKEN;
+    // The download checks the PDF exists with HeadObject: answer "it does" (account-download.test.ts covers the rest).
+    mock.method(S3Client.prototype, 'send', async () => ({}));
 
     db = await import('../src/db/pool.js');
     await db.query(`CREATE SCHEMA ${schema}`);
@@ -144,6 +147,7 @@ describe('UC2 my tickets (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
   });
 
   after(async () => {
+    mock.restoreAll();
     if (server) await new Promise((resolve) => server.close(resolve));
     await db?.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     await db?.pool.end();

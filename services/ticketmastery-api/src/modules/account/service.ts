@@ -1,4 +1,4 @@
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, NotFound, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { AuthUser } from '../../auth';
 import { pool } from '../../db/pool';
@@ -65,15 +65,31 @@ export async function getMyTicket(fanId: string, orderId: string) {
 
 /**
  * GET /api/me/tickets/:ticketId/download: a pre-signed link, so the browser downloads the PDF straight from the
- * private bucket. It doesn't check that ticket-fn has written the PDF yet: with only s3:GetObject, S3 answers a
- * missing object with 403, the same as a real permission problem.
+ * private bucket. First checks that ticket-fn has written the PDF (right after purchase, or while the order event sits
+ * in the DLQ, it hasn't): a link to a missing object would land the fan on S3's XML error page, outside the app.
  */
 export async function ticketDownloadUrl(fanId: string, orderId: string) {
   if (!TICKET_PDF_BUCKET) {
     throw new HttpError(503, 'not_configured', 'E-ticket downloads are not available yet');
   }
   if (!(await repo.findMyOrder(pool, fanId, orderId))) throw ticketNotFound();
+  await assertTicketPdfExists(TICKET_PDF_BUCKET, orderId);
   return presignTicketDownload(TICKET_PDF_BUCKET, orderId);
+}
+
+/**
+ * S3 answers a missing object with 404 only if the caller may list the bucket (s3:ListBucket, granted with the
+ * bucket); with s3:GetObject alone it answers 403, which is rethrown here like any other failure (500, logged).
+ */
+async function assertTicketPdfExists(bucket: string, orderId: string) {
+  try {
+    await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: ticketPdfKey(orderId) }));
+  } catch (err) {
+    if (err instanceof NotFound) {
+      throw new HttpError(409, 'ticket_not_ready', 'Your e-ticket is still being prepared');
+    }
+    throw err;
+  }
 }
 
 /** Signing is a local computation: no call to S3 happens here. */
