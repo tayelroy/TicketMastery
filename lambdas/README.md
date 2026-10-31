@@ -14,13 +14,12 @@ Infrastructure for a function (function, role, triggers, queues) belongs in its 
 
 | Folder | Owner | Use case | Trigger → effect | Status |
 |---|---|---|---|---|
-| `queue-manager/` | Yan Ting | UC3 virtual waiting room | EventBridge Scheduler (every minute during the sale window) → reads SQS FIFO `join-queue` → admits up to 500 fans per run into DynamoDB `live-queue` | planned |
-| `ticket-fn/` | Shi Hui | UC4 e-tickets | SNS `order-events` → SQS `ticket-queue` (DLQ `ticket-dlq` after 5 tries) → renders the PDF to S3 at `tickets/<orderId>.pdf` (UC2's download link reads that key, see [account](../services/ticketmastery-api/src/modules/account/README.md#download-link)) and emails it via SES | planned; **name is an open question** (`ticket-fn` vs `ticket-worker`) |
+| [`queue-manager/`](queue-manager/README.md) | Yan Ting | UC3 virtual waiting room | SQS FIFO `join-queue` → assigns queue numbers in DynamoDB `live-queue`; EventBridge Scheduler `rate(1 minute)` → admits the next 500 `WAITING` fans per concert (15 minutes, only inside the concert's sale window) and emits the `TicketMastery/WaitingRoomSize` metric (EMF) | implemented (Python 3.13, in VPC; `python3 -m unittest discover -s tests`) |
+| [`ticket-fn/`](ticket-fn/README.md) | Shi Hui | UC4 e-tickets | SNS `order-events` → SQS `ticket-queue` (batch 10, max concurrency 2, partial batch failures; DLQ `ticket-dlq` after 5 tries) → renders the PDF to S3 at `tickets/<orderId>.pdf` (UC2's download link reads that key, see [account](../services/ticketmastery-api/src/modules/account/README.md#download-link)), looks up the fan's email in Cognito and emails the PDF via SES once per order (sent marker `tickets/<orderId>.sent`); logs `deliveryLatencyMs` + EMF metric `TicketMastery/ETicketDeliveryLatency` | implemented (Node.js 22, outside the VPC; `npm test`; committed bundle from `npm run build`) |
 | `hold-sweeper/` (optional) | TBC (Yan Ting / Shi Hui) | UC3/UC4 | Scheduled → frees expired seat holds / waiting-room slots | **open question**, see below |
 
 ### Open questions
 
-- **`ticket-fn` vs `ticket-worker`.** Choose one name and use it for the folder, the Lambda function name, and Terraform. Rename `ticket-fn/` if the team picks `ticket-worker`.
 - **Who frees expired holds?** Options:
   1. `queue-manager` also releases expired holds.
   2. Separate `hold-sweeper-fn` and/or `wr-release-fn` functions.
