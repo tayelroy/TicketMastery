@@ -17,7 +17,13 @@ infra/
     ├── security/        alb_sg -> ecs_sg -> rds_sg chain
     ├── ecr/             ticketmastery-api repo, scan on push, keep last 10 images
     ├── rds/             PostgreSQL 16, db.t4g.micro, password managed in Secrets Manager
-    └── ecs-service/     log group, cluster, IAM roles, task def, ALB, service, autoscaling
+    ├── ecs-service/     log group, cluster, IAM roles, task def, ALB, service, autoscaling, ECS Exec
+    ├── edge/            (Cody) frontend S3 bucket, CloudFront, WAF
+    ├── github-deploy/   (Cody) GitHub Actions OIDC role for the frontend deploy
+    ├── auth-apigw/      (Andrew) Cognito user pool + HTTP API with JWT authorizer and VPC link
+    ├── waiting-room/    (Yan Ting) SQS FIFO join-queue, DynamoDB live-queue, queue-manager Lambda, admit schedule
+    ├── messaging/       (Shi Hui) SNS order-events, SQS ticket-queue + DLQ, ticket-fn, e-ticket bucket, SES
+    └── monitoring/      CloudWatch alarms -> SNS alerts email, dashboard, AWS Budgets
 ```
 
 | Module | Key outputs |
@@ -26,7 +32,8 @@ infra/
 | security | `alb_sg_id`, `ecs_sg_id`, `rds_sg_id` |
 | ecr | `repository_url` |
 | rds | `address`, `port`, `db_name`, `master_user_secret_arn`, `availability_zone` |
-| ecs-service | `alb_dns_name`, `http_listener_arn`, `https_listener_arn`, `cluster_name`, `service_name`, `task_role_name`, `task_role_arn`, `task_subnet_ids` |
+| ecs-service | `alb_dns_name`, `alb_arn_suffix`, `target_group_arn_suffix`, `http_listener_arn`, `https_listener_arn`, `cluster_name`, `service_name`, `task_role_name`, `task_role_arn`, `task_subnet_ids` |
+| monitoring | `alerts_topic_arn`, `dashboard_url` |
 
 ## Usage
 

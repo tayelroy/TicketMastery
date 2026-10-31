@@ -37,3 +37,8 @@ output "admit_schedule_name" {
   description = "EventBridge Scheduler schedule that runs the admit step every minute"
   value       = aws_scheduler_schedule.admit.name
 }
+
+output "join_dlq_name" {
+  description = "SQS join-queue DLQ name (the QueueName dimension of its CloudWatch metrics)."
+  value       = aws_sqs_queue.join_dlq.name
+}

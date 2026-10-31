@@ -35,8 +35,8 @@ The API task role gets `sqs:SendMessage` on join-queue and `dynamodb:GetItem` on
 | `admit_schedule_enabled` | `true` | `false` pauses the schedule (state `DISABLED`) without deleting it |
 | `admit_schedule_start_date`, `admit_schedule_end_date` | `null` | RFC 3339, e.g. `2026-11-09T19:55:00+08:00`; limit the schedule to a sale window |
 
-Outputs: `join_queue_url`, `join_queue_arn`, `join_dlq_url`, `live_queue_table_name`, `live_queue_table_arn`,
-`lambda_sg_id`, `queue_manager_function_name`, `admit_schedule_name`.
+Outputs: `join_queue_url`, `join_queue_arn`, `join_dlq_url`, `join_dlq_name`, `live_queue_table_name`,
+`live_queue_table_arn`, `lambda_sg_id`, `queue_manager_function_name`, `admit_schedule_name`.
 
 ## Admit schedule and its cost
 

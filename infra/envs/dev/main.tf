@@ -105,6 +105,9 @@ module "ecs_service" {
 
     # UC4 e-ticket pipeline (Shi Hui): checkout publishes OrderConfirmed here
     ORDER_EVENTS_TOPIC_ARN = module.messaging.order_events_topic_arn
+
+    # UC2 e-ticket downloads: ticket-fn writes tickets/<orderId>.pdf here
+    TICKET_PDF_BUCKET = module.messaging.ticket_pdf_bucket_name
   }
 
   enable_autoscaling       = var.enable_autoscaling
@@ -164,6 +167,10 @@ module "waiting_room" {
   vpc_id             = module.network.vpc_id
   private_subnet_ids = module.network.private_subnet_ids
   task_role_name     = module.ecs_service.task_role_name
+
+  admit_schedule_enabled    = var.admit_schedule_enabled
+  admit_schedule_start_date = var.admit_schedule_start_date
+  admit_schedule_end_date   = var.admit_schedule_end_date
 }
 
 # Auth (Cognito) + API Gateway - Andrew
@@ -200,10 +207,42 @@ check "auth_apigw_alb_integration" {
 }
 
 # E-ticket pipeline - Shi Hui
-# SNS order-events -> SQS ticket-queue (+ DLQ); the API may publish to the topic.
+# SNS order-events -> SQS ticket-queue (+ DLQ) -> ticket-fn -> S3 PDF + SES email; the API may publish to the topic
+# and read the PDFs (UC2 download links).
 module "messaging" {
   source = "../../modules/messaging"
 
-  name               = local.name
-  api_task_role_name = module.ecs_service.task_role_name
+  name                  = local.name
+  api_task_role_name    = module.ecs_service.task_role_name
+  ses_from_address      = var.contact_email
+  cognito_user_pool_id  = module.auth_apigw.user_pool_id
+  cognito_user_pool_arn = module.auth_apigw.user_pool_arn
+  log_retention_days    = var.log_retention_days
+  alarm_actions         = [module.monitoring.alerts_topic_arn]
+}
+
+# Monitoring and alerts - Elroy
+# CloudWatch alarms -> SNS alerts topic (email), one dashboard, AWS Budgets.
+module "monitoring" {
+  source = "../../modules/monitoring"
+
+  name                     = local.name
+  alert_email              = var.contact_email
+  alb_arn_suffix           = module.ecs_service.alb_arn_suffix
+  target_group_arn_suffix  = module.ecs_service.target_group_arn_suffix
+  ecs_cluster_name         = module.ecs_service.cluster_name
+  ecs_service_name         = module.ecs_service.service_name
+  autoscaling_enabled      = var.enable_autoscaling
+  autoscaling_max_capacity = var.autoscaling_max_capacity
+  rds_instance_id          = module.rds.instance_id
+  http_api_id              = module.auth_apigw.api_id
+  ticket_queue_name        = module.messaging.ticket_queue_name
+  ticket_dlq_name          = module.messaging.ticket_dlq_name
+  join_dlq_name            = module.waiting_room.join_dlq_name
+  api_log_group_name       = module.ecs_service.log_group_name
+
+  lambda_function_names = {
+    queue-manager = module.waiting_room.queue_manager_function_name
+    ticket-fn     = module.messaging.ticket_fn_function_name
+  }
 }

@@ -262,3 +262,27 @@ variable "waiting_room_public" {
   type        = bool
   default     = false
 }
+
+variable "admit_schedule_enabled" {
+  description = "UC3: run the queue-manager admit step every minute (EventBridge Scheduler)."
+  type        = bool
+  default     = true
+}
+
+variable "admit_schedule_start_date" {
+  description = "UC3: optional RFC 3339 start of the admit schedule, to limit it to a sale window (null = no limit)."
+  type        = string
+  default     = null
+}
+
+variable "admit_schedule_end_date" {
+  description = "UC3: optional RFC 3339 end of the admit schedule (null = no limit)."
+  type        = string
+  default     = null
+}
+
+variable "contact_email" {
+  description = "Team contact: SES sender of the e-ticket emails (must be verified), alert emails and AWS Budgets notifications."
+  type        = string
+  default     = "tayelroy@gmail.com"
+}
