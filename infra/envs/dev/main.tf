@@ -87,11 +87,12 @@ module "ecs_service" {
   db_name       = module.rds.db_name
   db_secret_arn = module.rds.master_user_secret_arn
 
-  desired_count      = var.desired_count
-  container_insights = var.container_insights
-  log_retention_days = var.log_retention_days
-  certificate_arn    = var.certificate_arn
-  alb_internal       = var.alb_internal
+  desired_count          = var.desired_count
+  container_insights     = var.container_insights
+  enable_execute_command = var.enable_execute_command
+  log_retention_days     = var.log_retention_days
+  certificate_arn        = var.certificate_arn
+  alb_internal           = var.alb_internal
 
   # Public identifiers for AUTH_MODE=cognito (not secrets). Teammates add their non-secret values here too.
   extra_environment = {

@@ -160,6 +160,12 @@ variable "container_insights" {
   default     = "disabled"
 }
 
+variable "enable_execute_command" {
+  description = "ECS Exec into the API task (team admins only, via IAM). Used for checks against RDS from inside the VPC."
+  type        = bool
+  default     = true
+}
+
 variable "log_retention_days" {
   description = "API log retention (days)."
   type        = number

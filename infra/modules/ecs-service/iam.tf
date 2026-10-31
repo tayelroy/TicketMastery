@@ -57,7 +57,27 @@ resource "aws_iam_role" "task" {
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
-# Intentionally no policies here. Teammates grant the API access to their
+# ECS Exec: the SSM agent in the task opens its session channel with the task role.
+data "aws_iam_policy_document" "ecs_exec" {
+  statement {
+    actions = [
+      "ssmmessages:CreateControlChannel",
+      "ssmmessages:CreateDataChannel",
+      "ssmmessages:OpenControlChannel",
+      "ssmmessages:OpenDataChannel",
+    ]
+    resources = ["*"] # these actions don't support resource-level permissions
+  }
+}
+
+resource "aws_iam_role_policy" "ecs_exec" {
+  count  = var.enable_execute_command ? 1 : 0
+  name   = "ecs-exec"
+  role   = aws_iam_role.task.id
+  policy = data.aws_iam_policy_document.ecs_exec.json
+}
+
+# No application permissions here (only ECS Exec above). Teammates grant the API access to their
 # resources from their own modules, e.g. in modules/waiting-room:
 #
 #   resource "aws_iam_role_policy" "api_sqs" {

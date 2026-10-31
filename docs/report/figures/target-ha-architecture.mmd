@@ -1,0 +1,73 @@
+flowchart TB
+  user([Fans and organisers<br/>SG 80%, MY / TH / HK ~6.7% each])
+
+  subgraph edge["Edge (global)"]
+    r53[Route 53]
+    cf["CloudFront PriceClass_200<br/>+ WAF (common rules, rate limit)"]
+    s3site[(S3 SPA bucket<br/>private, OAC)]
+  end
+
+  subgraph authapi["Auth and API front door"]
+    cognito["Cognito user pool<br/>group: organisers"]
+    apigw["API Gateway HTTP API<br/>JWT authorizer, throttling"]
+  end
+
+  subgraph region["ap-southeast-1"]
+    subgraph vpc["VPC 10.20.0.0/16, 2 AZs"]
+      subgraph pub["Public subnets AZ a + AZ b"]
+        nat["NAT gateway per AZ<br/>(or interface endpoints)"]
+      end
+      subgraph priv["Private subnets AZ a + AZ b"]
+        vpcl[VPC link]
+        alb["Internal ALB"]
+        ecs["ECS Fargate ticketmastery-api<br/>2-4+ tasks across 2 AZs<br/>CPU + request-count autoscaling"]
+        rds[("RDS PostgreSQL 16<br/>Multi-AZ primary + standby<br/>7-day PITR")]
+        qm["Lambda queue-manager<br/>(in VPC)"]
+      end
+    end
+
+    subgraph wr["Waiting room"]
+      sqsf[[SQS FIFO join-queue]]
+      sched["EventBridge Scheduler<br/>every 1 min, sale window"]
+      ddb[(DynamoDB live-queue)]
+    end
+
+    subgraph tix["E-tickets"]
+      sns[[SNS order-events]]
+      sqst[[SQS ticket-queue]]
+      dlq[[SQS ticket-dlq]]
+      tfn["Lambda ticket-fn<br/>(outside VPC)"]
+      s3pdf[(S3 e-ticket PDFs)]
+      ses[SES]
+    end
+
+    subgraph ops["Operations"]
+      cw["CloudWatch dashboard + alarms"]
+      alerts[[SNS alerts -> email]]
+      bud["AWS Budgets<br/>USD 20/40/60/80"]
+    end
+    ecr[(ECR)]
+    sm[(Secrets Manager)]
+    qs["QuickSight (design only)"]
+  end
+
+  user --> r53 --> cf
+  cf -->|static| s3site
+  cf -->|"/api/*, /health"| apigw
+  user -.->|sign in| cognito
+  apigw -.->|validate JWT| cognito
+  apigw --> vpcl --> alb --> ecs
+  ecs --> rds
+  ecs -.-> nat -.-> ecr
+  ecs -.-> sm
+  ecs -->|join| sqsf
+  sched --> qm
+  sqsf --> qm --> ddb
+  ecs -->|admission check| ddb
+  ecs -->|OrderConfirmed| sns --> sqst --> tfn
+  sqst -->|after 5 tries| dlq
+  tfn --> s3pdf
+  tfn --> ses
+  qs -.->|VPC connection| rds
+  cw --> alerts
+  bud --> alerts

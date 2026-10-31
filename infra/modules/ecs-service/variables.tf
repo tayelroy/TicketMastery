@@ -165,6 +165,12 @@ variable "container_insights" {
   }
 }
 
+variable "enable_execute_command" {
+  description = "Allow ECS Exec into the API tasks (needs the task in a subnet that can reach SSM: public IP or NAT/endpoints)."
+  type        = bool
+  default     = false
+}
+
 variable "log_group_name" {
   description = "CloudWatch log group for container logs."
   type        = string
