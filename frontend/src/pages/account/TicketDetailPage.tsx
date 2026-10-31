@@ -39,10 +39,13 @@ export function TicketDetailPage() {
       // Plain navigation to the 5-minute S3 link: the PDF comes as an attachment, so the page stays put.
       window.location.assign(url);
     } catch (e) {
+      // 503: no PDF bucket configured yet. 409: the PDF for this order hasn't been written yet.
       setMessage(
         e instanceof ApiError && e.status === 503
           ? "E-ticket PDFs aren't ready yet. You'll also get yours by email."
-          : `Download failed: ${(e as Error).message}`,
+          : e instanceof ApiError && e.status === 409
+            ? 'Your e-ticket is still being prepared. Try again in a minute.'
+            : `Download failed: ${(e as Error).message}`,
       );
     } finally {
       setDownloading(false);

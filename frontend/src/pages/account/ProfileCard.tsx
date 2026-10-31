@@ -1,4 +1,4 @@
-import { fetchUserAttributes, updateUserAttributes } from 'aws-amplify/auth';
+import { fetchAuthSession, fetchUserAttributes, updateUserAttributes } from 'aws-amplify/auth';
 import { useEffect, useState, type FormEvent } from 'react';
 import { AUTH_MODE } from '../../auth/amplify';
 
@@ -46,6 +46,8 @@ function CognitoProfileForm() {
     setStatus(undefined);
     try {
       await updateUserAttributes({ userAttributes: { name: name.trim() } });
+      // New tokens carry the new name. Amplify then fires `tokenRefresh`, and AuthContext updates the header.
+      await fetchAuthSession({ forceRefresh: true });
       setName(name.trim());
       setStatus('Saved.');
     } catch (err) {
