@@ -275,7 +275,7 @@ export function CheckoutPage() {
             Your e-tickets are on their way by email. You'll also find them under My Tickets.
           </p>
           <div className="row">
-            <Link to="/myaccount/tickets" className="btn">
+            <Link to={`/myaccount/tickets/${confirmed.orderId}`} className="btn">
               My Tickets
             </Link>
             <Link to="/concerts" className="btn ghost">

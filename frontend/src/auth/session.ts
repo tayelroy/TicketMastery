@@ -10,7 +10,10 @@ export interface Session {
   userId: string;
   /** Becomes `req.user.groups`, e.g. ['organisers']. */
   groups: string[];
-  /** What pages show for the user: the email in cognito mode (the sub is a UUID), the user ID in dev-header mode. */
+  /**
+   * What pages show for the user. Cognito mode: the display name from the profile card (`name`), else the email (the
+   * sub is a UUID). Dev-header mode: the user ID.
+   */
   displayName: string;
 }
 
@@ -50,11 +53,12 @@ export async function loadCognitoSession(): Promise<Session | null> {
     const access = tokens?.accessToken;
     if (!access?.payload.sub) return null;
     const groups = access.payload['cognito:groups'];
-    const email = tokens?.idToken?.payload.email;
+    const { name, email } = tokens?.idToken?.payload ?? {};
     return {
       userId: access.payload.sub,
       groups: Array.isArray(groups) ? groups.filter((g): g is string => typeof g === 'string') : [],
-      displayName: typeof email === 'string' ? email : access.payload.sub,
+      displayName:
+        typeof name === 'string' && name.trim() ? name : typeof email === 'string' ? email : access.payload.sub,
     };
   } catch {
     return null;
