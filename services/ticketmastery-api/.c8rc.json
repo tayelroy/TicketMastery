@@ -1,5 +1,5 @@
 {
-  "include": ["src/auth/index.ts", "src/config.ts"],
+  "include": ["src/auth/index.ts", "src/config.ts", "src/modules/account/*.ts"],
   "exclude-after-remap": true,
   "check-coverage": true,
   "100": true,
