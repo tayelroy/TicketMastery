@@ -32,7 +32,7 @@ describe('UC2 my tickets (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
   let concertId: string;
   let cancelledConcertId: string;
 
-  /** A published concert with VIP row A (S$250) and GA row B (S$100), sale open. Returns seat ids by label. */
+  /** A published concert with VIP row A1-3 (S$250) and GA row B1-10 (S$100), sale open. Returns seat ids by label. */
   async function createOnSaleConcert() {
     const day = 24 * 60 * 60 * 1000;
     const concert = await organiser.createConcert(ORGANISER, {
@@ -46,7 +46,7 @@ describe('UC2 my tickets (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
     });
     await organiser.replaceTicketTypes(ORGANISER, concert.id, {
       ticketTypes: [
-        { name: 'GA', priceCents: 10_000, currency: 'SGD', quantity: 6, maxPerOrder: 4 },
+        { name: 'GA', priceCents: 10_000, currency: 'SGD', quantity: 10, maxPerOrder: 4 },
         { name: 'VIP', priceCents: 25_000, currency: 'SGD', quantity: 3, maxPerOrder: 2 },
       ],
     });
@@ -56,7 +56,7 @@ describe('UC2 my tickets (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
           name: 'Floor',
           rows: [
             { label: 'A', ticketTypeName: 'VIP', seats: { from: 1, to: 3 } },
-            { label: 'B', ticketTypeName: 'GA', seats: { from: 1, to: 6 } },
+            { label: 'B', ticketTypeName: 'GA', seats: { from: 1, to: 10 } },
           ],
         },
       ],
@@ -114,8 +114,9 @@ describe('UC2 my tickets (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
 
     const c = await createOnSaleConcert();
     concertId = c.id;
-    // fan-a: two confirmed orders on this concert. Seats are picked out of seat-map order on purpose.
-    order.first = await buy('fan-a', c.id, [c.seat.B2!, c.seat.A1!]);
+    // fan-a: two confirmed orders on this concert. Seats are picked out of seat-map order on purpose, and B10 checks
+    // that seat numbers sort as numbers (B2 before B10), not as text.
+    order.first = await buy('fan-a', c.id, [c.seat.B10!, c.seat.B2!, c.seat.A1!]);
     order.second = await buy('fan-a', c.id, [c.seat.B1!]);
     // fan-b: one confirmed order.
     order.otherFan = await buy('fan-b', c.id, [c.seat.B3!]);
@@ -197,9 +198,9 @@ describe('UC2 my tickets (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
       orderId: order.first,
       confirmedAt: rows[0]!.confirmed_at.toISOString(),
       currency: 'SGD',
-      subtotalCents: 35_000,
-      bookingFeeCents: 2 * checkout.BOOKING_FEE_CENTS_PER_SEAT,
-      totalCents: 35_000 + 2 * checkout.BOOKING_FEE_CENTS_PER_SEAT,
+      subtotalCents: 45_000,
+      bookingFeeCents: 3 * checkout.BOOKING_FEE_CENTS_PER_SEAT,
+      totalCents: 45_000 + 3 * checkout.BOOKING_FEE_CENTS_PER_SEAT,
       concert: {
         id: concertId,
         title: rows[0]!.title,
@@ -212,6 +213,7 @@ describe('UC2 my tickets (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
       seats: [
         { section: 'Floor', row: 'A', seatNumber: '1', ticketType: 'VIP', priceCents: 25_000 },
         { section: 'Floor', row: 'B', seatNumber: '2', ticketType: 'GA', priceCents: 10_000 },
+        { section: 'Floor', row: 'B', seatNumber: '10', ticketType: 'GA', priceCents: 10_000 },
       ],
     };
 

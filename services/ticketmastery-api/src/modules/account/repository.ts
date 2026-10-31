@@ -27,7 +27,10 @@ export interface MyOrderRow {
   image_url: string | null;
   /** The concert's own status: an organiser can cancel it after the order was confirmed. */
   concert_status: ConcertStatus;
-  /** Built by Postgres, in seat-map order (section, row, seat). */
+  /**
+   * Built by Postgres, in seat-map order (section, row, seat). seat_number is text, so numbers sort as numbers (2
+   * before 10), like discovery's seat map; bigint because a seat number can be 10 digits long.
+   */
   seats: TicketSeat[];
 }
 
@@ -44,7 +47,8 @@ const MY_ORDERS = `
          COALESCE((
            SELECT json_agg(json_build_object('section', sec.name, 'row', r.label, 'seatNumber', s.seat_number,
                                              'ticketType', tt.name, 'priceCents', oi.price_cents)
-                           ORDER BY sec.sort_order, r.sort_order, s.seat_number)
+                           ORDER BY sec.sort_order, sec.name, r.sort_order, r.label,
+                                    substring(s.seat_number FROM '^[0-9]+')::bigint NULLS LAST, s.seat_number)
              FROM order_items oi
              JOIN seats s         ON s.id = oi.seat_id
              JOIN ticket_types tt ON tt.id = oi.ticket_type_id
