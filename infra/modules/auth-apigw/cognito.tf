@@ -37,6 +37,12 @@ resource "aws_cognito_user_pool" "this" {
     email_message        = "Your TicketMastery code is {####}"
   }
 
+  # A changed email stays pending until the user enters the code sent to the new address; until then the old,
+  # verified email is still the sign-in name. Without this, UpdateUserAttributes swaps the sign-in email at once.
+  user_attribute_update_settings {
+    attributes_require_verification_before_update = ["email"]
+  }
+
   tags = var.tags
 }
 
@@ -52,6 +58,11 @@ resource "aws_cognito_user_pool_client" "spa" {
   ]
   prevent_user_existence_errors = "ENABLED" # don't reveal which emails are registered
   enable_token_revocation       = true
+
+  # What the browser may read and change with the user's own access token (Amplify fetch/updateUserAttributes).
+  # `email` stays writable because sign-up sends it as an attribute; the pool's update settings guard changes to it.
+  read_attributes  = ["email", "email_verified", "name"]
+  write_attributes = ["email", "name"]
 
   access_token_validity  = 60
   id_token_validity      = 60
