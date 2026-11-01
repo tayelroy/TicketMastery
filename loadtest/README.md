@@ -149,8 +149,9 @@ FANS=20 FAN_OFFSET=102 SALE_OPENS_IN=120 k6 run k6/nfr6-waiting-room.js
 Expect positions 1–20 in join order, `Position inversions 0`, `Admission-order inversions 0`, `PASS`. With the
 default batch of 500 all 20 fans are admitted by the same run; the evidence is then "queue position = arrival
 order" plus "nobody admitted ahead of an earlier fan". To see several admit runs, the admit batch has to be smaller
-than 20 (`admit_batch_size` exists in `modules/waiting-room` but is not passed through `infra/envs/dev`).
-Screenshot: CloudWatch Logs for `queue-manager` (`ASSIGNED … -> #n` lines and `ADMIT RUN admitted=20`).
+than 20: plan and apply with `-var admit_batch_size=5` (it changes only the queue-manager environment and the
+schedule description), run the test, then plan/apply without it to restore 500.
+Screenshot: CloudWatch Logs for `queue-manager` (`ASSIGNED … -> #n` lines and `ADMIT RUN admitted=…`).
 
 **7. NFR-7 e-ticket delay** (read-only; 5 minutes after step 4):
 
@@ -172,8 +173,10 @@ scripts/alb-metrics.sh nfr1 $(jq -r '.startedAt, .finishedAt' "$(ls -t results/n
 Expect p95 / p99 and `PASS` or `FAIL` against 300 / 800 ms, then the ALB p95/p99 per minute. Screenshot: CloudWatch
 metric ALB `TargetResponseTime` (p95, 1-minute period) over the window.
 
-**9. NFR-2 burst** (≈ 21 min). Switch autoscaling on first: in `infra/envs/dev/terraform.tfvars` set
-`enable_autoscaling = true` and `autoscaling_max_capacity = 3`, `terraform plan -out tfplan && terraform apply tfplan`.
+**9. NFR-2 burst** (≈ 21 min). Switch autoscaling on first, without editing `terraform.tfvars`:
+`terraform -chdir=../infra/envs/dev plan -out=/tmp/as.tfplan -var enable_autoscaling=true -var autoscaling_max_capacity=3`;
+apply only if the plan touches just the scalable target, the two scaling policies, the service's desired count and
+the monitoring scaling-ceiling alarm.
 
 ```bash
 BASE_RPS=10 MULT=10 WARM=2m RAMP=1m HOLD=10m COOL=3m scripts/nfr2-burst.sh
@@ -182,8 +185,8 @@ BASE_RPS=10 MULT=10 WARM=2m RAMP=1m HOLD=10m COOL=3m scripts/nfr2-burst.sh
 Expect the k6 table (peak minute ≈ 100 req/s, `429 (throttled)` count, `Dropped (non-429 errors)` 0), then
 `Tasks before 1`, `Max tasks` 2–3 with the minutes after the ramp started, the task count every 15 s, the
 scaling activities and ECS events. Screenshots while it runs: the `ticketmastery-dev` CloudWatch dashboard (whole
-burst), ECS → service → Events and Tasks tabs, any alarm emails. Afterwards set `enable_autoscaling = false` again and
-apply (the count returns to 1).
+burst), ECS → service → Events and Tasks tabs, any alarm emails. Afterwards plan/apply again without the `-var`
+flags (the plan must only remove those resources); the count returns to 1.
 
 **10. NFR-5 / F1 task loss** (≈ 3–5 min; with autoscaling off, so one task):
 

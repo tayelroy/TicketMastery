@@ -40,7 +40,7 @@ Outputs: `join_queue_url`, `join_queue_arn`, `join_dlq_url`, `join_dlq_name`, `l
 
 ## Admit schedule and its cost
 
-Instructor feedback (d) in [docs/architecture.md](../../../docs/architecture.md#instructor-feedback-open-items-not-implemented)
+Instructor feedback (d) in [docs/architecture.md](../../../docs/architecture.md#instructor-feedback-and-how-we-addressed-it)
 asked us to check what a per-minute EventBridge schedule costs. ESTIMATE for a month with the schedule always on, from
 the free tiers and list prices quoted in that table (verify against the AWS pricing pages for the report):
 

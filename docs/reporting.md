@@ -1,6 +1,6 @@
 # UC5 internal reporting
 
-Answers [instructor feedback e](architecture.md#instructor-feedback-open-items-not-implemented): organisers need
+Answers [instructor feedback e](architecture.md#instructor-feedback-and-how-we-addressed-it): organisers need
 internal reporting and sales statistics, for example in QuickSight.
 
 - **Built and tested:** the data layer. Five read-only SQL views in RDS
@@ -182,7 +182,7 @@ refreshes add a few seconds of RDS work per hour.
 
 - **Per-user monthly billing.** QuickSight charges each user per month, not per use, so it costs the same whether
   anyone opens the dashboard or not.
-- **The course budget is USD 80 in total**, and the base stack alone is about USD 69 per month if left running
+- **The course budget is USD 80 in total**, and the deployed stack alone is about USD 72 per month if left running
   ([cost-estimate.md](cost-estimate.md)). The smallest QuickSight setup (USD 30 per month, USD 24 of it for the one
   Author) would take over a third of the whole budget; reader capacity pricing (USD 250 per month minimum) is out of
   reach.

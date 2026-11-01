@@ -103,7 +103,16 @@ aws secretsmanager get-secret-value \
   --query SecretString --output text
 ```
 
-Print it only when you need it. Never paste it into chat, code, `.env` files, or tickets. The database is in private subnets and **can't be reached from your laptop**. Debug through the API, or use ECS Exec / a temporary bastion if the team agrees to one.
+Print it only when you need it. Never paste it into chat, code, `.env` files, or tickets. The database is in private subnets and **can't be reached from your laptop**. Debug through the API, or with ECS Exec into the running API task (on by default, `enable_execute_command = true`; needs the Session Manager plugin):
+
+```bash
+TASK=$(aws ecs list-tasks --cluster "$(terraform output -raw ecs_cluster_name)" \
+  --service-name "$(terraform output -raw ecs_service_name)" --query 'taskArns[0]' --output text)
+aws ecs execute-command --cluster "$(terraform output -raw ecs_cluster_name)" --task "$TASK" \
+  --container ticketmastery-api --interactive --command "sh"
+```
+
+`loadtest/scripts/nfr3-oversell-check.sh` uses this to run its SQL check inside the VPC.
 
 ## Deploying a new image
 
@@ -115,11 +124,44 @@ Print it only when you need it. Never paste it into chat, code, `.env` files, or
      --service "$(terraform output -raw ecs_service_name)" --force-new-deployment
    ```
 
-Whether Cody's pipeline takes this over is an [open question](architecture.md#open-questions).
+The API image is deployed by hand like this; only the frontend has a pipeline (next section).
+
+## Deploying the frontend
+
+The `Deploy Frontend to AWS` workflow (manual, `main` only) builds `frontend/` with Cognito sign-in, syncs it to the
+frontend bucket and invalidates CloudFront. To deploy from another branch, run the same steps by hand from the repo
+root:
+
+```bash
+cd infra/envs/dev
+POOL=$(terraform output -raw cognito_user_pool_id); CLIENT=$(terraform output -raw cognito_user_pool_client_id)
+BUCKET=$(terraform output -raw frontend_bucket_name); DIST=$(terraform output -raw cloudfront_distribution_id)
+cd ../../../frontend
+VITE_AUTH_MODE=cognito VITE_COGNITO_USER_POOL_ID=$POOL VITE_COGNITO_CLIENT_ID=$CLIENT VITE_API_BASE_URL="" npm run build
+aws s3 sync dist/ "s3://$BUCKET/" --exclude index.html --exclude 'assets/*' --cache-control public,max-age=300
+aws s3 sync dist/assets/ "s3://$BUCKET/assets/" --cache-control public,max-age=31536000,immutable
+aws s3 cp dist/index.html "s3://$BUCKET/index.html" --cache-control no-cache,no-store,must-revalidate --content-type text/html
+aws cloudfront create-invalidation --distribution-id "$DIST" --paths '/*'
+```
+
+## After the first apply of the e-ticket pipeline and monitoring
+
+AWS sends two emails to `contact_email` (`terraform.tfvars`, default the team address) that someone has to click:
+
+1. **SES "Email Address Verification Request"**: verifies the e-ticket sender. Until then `ticket-fn` can't send, and
+   orders land in `ticket-dlq` after 5 tries (re-drive them afterwards; already-emailed orders are skipped). Check with
+   `aws sesv2 get-email-identity --email-identity <address> --query VerifiedForSendingStatus`.
+2. **SNS "Subscription Confirmation"** for `ticketmastery-dev-alerts`: until confirmed, alarm emails are dropped.
+
+The account is in the **SES sandbox**: every recipient must also be a verified identity (or an SES mailbox-simulator
+address such as `success@simulator.amazonses.com`). Before a demo, verify each demo fan's email in the SES console.
+
+When you change `lambdas/ticket-fn/src`, run `npm run build` in `lambdas/ticket-fn` and commit `bundle/index.js`:
+Terraform zips the committed bundle.
 
 ## Switching to the HA target design
 
-The HA design is for the diagram and report. Deploy it only if the team agrees to the cost (≈ USD 190/month instead of ≈ 69; see [cost-estimate.md](cost-estimate.md)). Copy the values from the commented "HA / target design" block at the bottom of `terraform.tfvars.example` into `terraform.tfvars`. Apply in two steps, so the NAT routes exist before tasks move into the private subnets:
+The HA design is for the diagram and report. Deploy it only if the team agrees to the cost (≈ USD 194/month instead of ≈ 72 for the whole stack; see [cost-estimate.md](cost-estimate.md)). Copy the values from the commented "HA / target design" block at the bottom of `terraform.tfvars.example` into `terraform.tfvars`. Apply in two steps, so the NAT routes exist before tasks move into the private subnets:
 
 1. Network first: set `enable_nat_gateway = true` and `single_nat_gateway = false` (or `enable_vpc_endpoints = true`), then `terraform plan -out tfplan && terraform apply tfplan`.
 2. Everything else: set `tasks_in_public_subnets = false`, `tasks_single_az = false`, `desired_count = 2`, `enable_autoscaling = true`, `autoscaling_min_capacity = 2`, `autoscaling_max_capacity = 4`, `db_multi_az = true`, `db_deletion_protection = true`, `db_backup_retention_period = 7`, then plan and apply again.
@@ -146,7 +188,7 @@ terraform init -migrate-state
 
 ## Teardown
 
-Destroy when you aren't demoing. The default (implementation-mode) stack costs about USD 2.3/day; the HA target design about USD 6.3/day (see [cost-estimate.md](cost-estimate.md)). If you deployed the HA design, set `db_deletion_protection = false` and apply before destroying.
+Destroy when you aren't demoing. The default (implementation-mode) stack costs about USD 2.4/day; the HA target design about USD 6.4/day (see [cost-estimate.md](cost-estimate.md)). If you deployed the HA design, set `db_deletion_protection = false` and apply before destroying.
 
 ```bash
 cd infra/envs/dev
@@ -166,6 +208,6 @@ Afterwards, check the console in `ap-southeast-1` for leftovers that keep billin
 - **CloudWatch → Log groups**: groups created outside Terraform (Lambda, ECS Exec).
 - **RDS → Snapshots**: manual or final snapshots.
 - **Secrets Manager**: secrets other modules created. Deleted secrets sit in a recovery window, and you can't reuse the name until it ends.
-- Teammates' stacks (CloudFront, API Gateway, Lambda, …): ask them to destroy theirs.
+- Everything else in `infra/envs/dev` (CloudFront, API Gateway, Lambdas, queues, monitoring) is in the same state and goes with the same `terraform destroy`. The e-ticket and frontend buckets have `force_destroy` on in dev.
 
-Make sure an **AWS Budgets** alert exists on the account (e.g. USD 50/month with alerts at 50/80/100%). Cody owns the account, so ask him to confirm it.
+The `monitoring` module creates the account's **AWS Budgets** budget (USD 80/month, alerts at USD 20/40/60/80 actual and on forecast); `terraform destroy` removes it too, so recreate one by hand if the account stays in use.
