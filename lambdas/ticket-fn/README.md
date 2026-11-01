@@ -14,7 +14,7 @@ UC5 cancel ---ConcertCancelled-->      (same)              |                    
 
 | Event (`type`) | Effect |
 |---|---|
-| `OrderConfirmed` | Renders a PDF (order summary + one page per seat), stores it at `tickets/<orderId>.pdf`, emails it as an attachment. |
+| `OrderConfirmed` | Renders a PDF (order summary + one page per seat), stores it at `tickets/<orderId>.pdf`, emails it as an attachment. UC2's "download ticket" link serves the same object (the API gets read access to `tickets/*` and `TICKET_PDF_BUCKET`), so keep the key. |
 | `ConcertCancelled` | Emails the fan that the concert is cancelled, with the reason and refund amount. |
 | anything else | Logged (`SKIPPED`) and dropped. |
 

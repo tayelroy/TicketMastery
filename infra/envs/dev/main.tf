@@ -102,8 +102,9 @@ module "ecs_service" {
     WAITING_ROOM_JOIN_QUEUE_URL = module.waiting_room.join_queue_url
     WAITING_ROOM_TABLE_NAME     = module.waiting_room.live_queue_table_name
 
-    # UC4 e-ticket pipeline (Shi Hui): checkout publishes OrderConfirmed here
+    # UC4 e-ticket pipeline (Shi Hui): checkout publishes OrderConfirmed here; UC2 signs PDF download links
     ORDER_EVENTS_TOPIC_ARN = module.messaging.order_events_topic_arn
+    TICKET_PDF_BUCKET      = module.messaging.ticket_bucket_name
   }
 
   enable_autoscaling       = var.enable_autoscaling

@@ -4,7 +4,7 @@ variable "name" {
 }
 
 variable "api_task_role_name" {
-  description = "Name of the API's ECS task role (root output task_role_name); gets sns:Publish on order-events."
+  description = "Name of the API's ECS task role (root output task_role_name); gets sns:Publish on order-events and read access to the e-ticket PDFs (UC2 downloads)."
   type        = string
 }
 

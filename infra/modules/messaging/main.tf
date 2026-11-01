@@ -116,6 +116,28 @@ resource "aws_iam_role_policy" "api_publish" {
   policy = data.aws_iam_policy_document.api_publish.json
 }
 
+# UC2 "download ticket" (account module): the API checks tickets/<orderId>.pdf exists, then signs a GetObject link.
+# Read-only, and only the PDFs: not the sent/ markers. ListBucket makes a missing PDF a 404 instead of a 403.
+data "aws_iam_policy_document" "api_ticket_pdfs" {
+  statement {
+    sid       = "ReadTicketPdfs"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.tickets.arn}/tickets/*"]
+  }
+
+  statement {
+    sid       = "ListTicketBucket"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.tickets.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "api_ticket_pdfs" {
+  name   = "messaging-ticket-pdfs-read"
+  role   = var.api_task_role_name
+  policy = data.aws_iam_policy_document.api_ticket_pdfs.json
+}
+
 ################################################################################
 # Alarm
 ################################################################################
