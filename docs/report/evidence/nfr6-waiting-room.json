@@ -1,0 +1,218 @@
+{
+  "test": "nfr6-waiting-room",
+  "startedAt": "2026-10-31T16:29:11.129Z",
+  "finishedAt": "2026-10-31T16:34:49.466Z",
+  "baseUrl": "https://veft7waoye.execute-api.ap-southeast-1.amazonaws.com",
+  "auth": "cognito",
+  "admissionInversions": 0,
+  "admitRuns": 4,
+  "notAdmitted": 0,
+  "positionMismatches": 0,
+  "concertId": "2d523894-1500-47db-b85c-9b8418c45181",
+  "fans": 20,
+  "pass": true,
+  "positionInversions": 0,
+  "saleStartsAt": "2026-10-31T16:31:11.127Z",
+  "order": [
+    {
+      "admittedUntil": "2026-10-31T16:46:46.000Z",
+      "fanId": "298ab5ac-7011-7066-c418-be7c5498261a",
+      "index": 102,
+      "joinOrder": 1,
+      "joinedAt": "2026-10-31T16:29:11.458Z",
+      "position": 1,
+      "admitRun": 1,
+      "admittedSeenAt": "2026-10-31T16:31:52.051Z"
+    },
+    {
+      "index": 103,
+      "joinOrder": 2,
+      "joinedAt": "2026-10-31T16:29:11.685Z",
+      "position": 2,
+      "admitRun": 1,
+      "admittedSeenAt": "2026-10-31T16:31:52.051Z",
+      "admittedUntil": "2026-10-31T16:46:46.000Z",
+      "fanId": "992a75dc-00b1-70ea-abcd-c481891e0239"
+    },
+    {
+      "joinOrder": 3,
+      "joinedAt": "2026-10-31T16:29:11.952Z",
+      "position": 3,
+      "admitRun": 1,
+      "admittedSeenAt": "2026-10-31T16:31:52.051Z",
+      "admittedUntil": "2026-10-31T16:46:46.000Z",
+      "fanId": "c95a75bc-8031-7059-b954-2056c0afd413",
+      "index": 104
+    },
+    {
+      "admitRun": 1,
+      "admittedSeenAt": "2026-10-31T16:31:52.051Z",
+      "admittedUntil": "2026-10-31T16:46:46.000Z",
+      "fanId": "a9cab50c-7091-70ff-3931-2775373b6288",
+      "index": 105,
+      "joinOrder": 4,
+      "joinedAt": "2026-10-31T16:29:12.178Z",
+      "position": 4
+    },
+    {
+      "joinOrder": 5,
+      "joinedAt": "2026-10-31T16:29:12.447Z",
+      "position": 5,
+      "admitRun": 1,
+      "admittedSeenAt": "2026-10-31T16:31:52.051Z",
+      "admittedUntil": "2026-10-31T16:46:46.000Z",
+      "fanId": "b91a055c-9071-7028-eaef-ee2eae362a0e",
+      "index": 106
+    },
+    {
+      "fanId": "d90a559c-6031-701e-3f5b-2573af46b44b",
+      "index": 107,
+      "joinOrder": 6,
+      "joinedAt": "2026-10-31T16:29:12.696Z",
+      "position": 6,
+      "admitRun": 2,
+      "admittedSeenAt": "2026-10-31T16:32:51.258Z",
+      "admittedUntil": "2026-10-31T16:47:46.000Z"
+    },
+    {
+      "joinedAt": "2026-10-31T16:29:12.925Z",
+      "position": 7,
+      "admitRun": 2,
+      "admittedSeenAt": "2026-10-31T16:32:51.258Z",
+      "admittedUntil": "2026-10-31T16:47:46.000Z",
+      "fanId": "d96a95ac-50e1-70b8-4734-59af577261c7",
+      "index": 108,
+      "joinOrder": 7
+    },
+    {
+      "index": 109,
+      "joinOrder": 8,
+      "joinedAt": "2026-10-31T16:29:13.152Z",
+      "position": 8,
+      "admitRun": 2,
+      "admittedSeenAt": "2026-10-31T16:32:51.258Z",
+      "admittedUntil": "2026-10-31T16:47:46.000Z",
+      "fanId": "e95a750c-b001-708a-3cfe-5f49de5469b8"
+    },
+    {
+      "joinOrder": 9,
+      "joinedAt": "2026-10-31T16:29:13.379Z",
+      "position": 9,
+      "admitRun": 2,
+      "admittedSeenAt": "2026-10-31T16:32:51.258Z",
+      "admittedUntil": "2026-10-31T16:47:46.000Z",
+      "fanId": "b98a35ac-2081-70a7-5979-a1ac008e0017",
+      "index": 110
+    },
+    {
+      "fanId": "a92a650c-f0e1-7071-1521-1438fcbea81a",
+      "index": 111,
+      "joinOrder": 10,
+      "joinedAt": "2026-10-31T16:29:13.679Z",
+      "position": 10,
+      "admitRun": 2,
+      "admittedSeenAt": "2026-10-31T16:32:51.258Z",
+      "admittedUntil": "2026-10-31T16:47:46.000Z"
+    },
+    {
+      "fanId": "a9dad57c-2061-706a-4fd4-5728493e257b",
+      "index": 112,
+      "joinOrder": 11,
+      "joinedAt": "2026-10-31T16:29:13.910Z",
+      "position": 11,
+      "admitRun": 3,
+      "admittedSeenAt": "2026-10-31T16:33:48.551Z",
+      "admittedUntil": "2026-10-31T16:48:46.000Z"
+    },
+    {
+      "index": 113,
+      "joinOrder": 12,
+      "joinedAt": "2026-10-31T16:29:14.141Z",
+      "position": 12,
+      "admitRun": 3,
+      "admittedSeenAt": "2026-10-31T16:33:48.551Z",
+      "admittedUntil": "2026-10-31T16:48:46.000Z",
+      "fanId": "090a050c-b071-7057-268d-b1dd53baff9f"
+    },
+    {
+      "admitRun": 3,
+      "admittedSeenAt": "2026-10-31T16:33:48.551Z",
+      "admittedUntil": "2026-10-31T16:48:46.000Z",
+      "fanId": "a9ba95ec-d0a1-7002-8bde-813022cf46dd",
+      "index": 114,
+      "joinOrder": 13,
+      "joinedAt": "2026-10-31T16:29:14.364Z",
+      "position": 13
+    },
+    {
+      "admittedUntil": "2026-10-31T16:48:46.000Z",
+      "fanId": "893a15dc-a051-707c-0f75-c45bb7ce3d17",
+      "index": 115,
+      "joinOrder": 14,
+      "joinedAt": "2026-10-31T16:29:14.592Z",
+      "position": 14,
+      "admitRun": 3,
+      "admittedSeenAt": "2026-10-31T16:33:48.551Z"
+    },
+    {
+      "admittedUntil": "2026-10-31T16:48:46.000Z",
+      "fanId": "b90a756c-9071-7015-5e14-1c62527a08d8",
+      "index": 116,
+      "joinOrder": 15,
+      "joinedAt": "2026-10-31T16:29:14.817Z",
+      "position": 15,
+      "admitRun": 3,
+      "admittedSeenAt": "2026-10-31T16:33:48.551Z"
+    },
+    {
+      "admittedSeenAt": "2026-10-31T16:34:49.462Z",
+      "admittedUntil": "2026-10-31T16:49:46.000Z",
+      "fanId": "290a759c-60c1-7077-e136-2a613aa10537",
+      "index": 117,
+      "joinOrder": 16,
+      "joinedAt": "2026-10-31T16:29:15.042Z",
+      "position": 16,
+      "admitRun": 4
+    },
+    {
+      "admittedUntil": "2026-10-31T16:49:46.000Z",
+      "fanId": "09da25ec-d031-7011-1d7f-f55b011ca90c",
+      "index": 118,
+      "joinOrder": 17,
+      "joinedAt": "2026-10-31T16:29:15.267Z",
+      "position": 17,
+      "admitRun": 4,
+      "admittedSeenAt": "2026-10-31T16:34:49.462Z"
+    },
+    {
+      "joinedAt": "2026-10-31T16:29:15.492Z",
+      "position": 18,
+      "admitRun": 4,
+      "admittedSeenAt": "2026-10-31T16:34:49.462Z",
+      "admittedUntil": "2026-10-31T16:49:46.000Z",
+      "fanId": "29fa252c-2091-70f9-0030-e1c575347fa0",
+      "index": 119,
+      "joinOrder": 18
+    },
+    {
+      "fanId": "39dac59c-20b1-707e-9cd7-024440bc92f6",
+      "index": 120,
+      "joinOrder": 19,
+      "joinedAt": "2026-10-31T16:29:15.720Z",
+      "position": 19,
+      "admitRun": 4,
+      "admittedSeenAt": "2026-10-31T16:34:49.462Z",
+      "admittedUntil": "2026-10-31T16:49:46.000Z"
+    },
+    {
+      "position": 20,
+      "admitRun": 4,
+      "admittedSeenAt": "2026-10-31T16:34:49.462Z",
+      "admittedUntil": "2026-10-31T16:49:46.000Z",
+      "fanId": "a96a553c-2021-7039-0f2e-227a031f3c55",
+      "index": 121,
+      "joinOrder": 20,
+      "joinedAt": "2026-10-31T16:29:15.947Z"
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "test": "nfr4-hold-expiry",
+  "startedAt": "2026-10-31T16:29:11.131Z",
+  "finishedAt": "2026-10-31T16:39:47.518Z",
+  "baseUrl": "https://veft7waoye.execute-api.ap-southeast-1.amazonaws.com",
+  "auth": "cognito",
+  "availableAfterSec": 0.6,
+  "availableAt": "2026-10-31T16:39:47.432Z",
+  "pollIntervalSec": 2,
+  "statusBeforeExpiry": "held",
+  "reHoldAfterSec": 0.6,
+  "expiresAt": "2026-10-31T16:39:46.848Z",
+  "holdId": "8e5b5a8d-dabf-4423-acf7-8671b0d4f096",
+  "lateConfirm": {
+    "status": 409,
+    "code": "hold_expired"
+  },
+  "reHold": {
+    "at": "2026-10-31T16:39:47.480Z",
+    "code": null,
+    "status": 201
+  },
+  "heldAt": "2026-10-31T16:29:46.848Z",
+  "seat": "R20-1000",
+  "admission": {
+    "waitingRoom": "enforced",
+    "admitted": 2,
+    "admittedAfterSec": 36,
+    "earliestAdmissionEndsInSec": 899
+  },
+  "concertId": "16e33f9e-ee2f-4e64-8e37-410b644dbf5b",
+  "pass": true,
+  "polls": [
+    {
+      "status": "held",
+      "at": "2026-10-31T16:39:26.975Z"
+    },
+    {
+      "at": "2026-10-31T16:39:29.011Z",
+      "status": "held"
+    },
+    {
+      "at": "2026-10-31T16:39:31.079Z",
+      "status": "held"
+    },
+    {
+      "at": "2026-10-31T16:39:33.120Z",
+      "status": "held"
+    },
+    {
+      "at": "2026-10-31T16:39:35.166Z",
+      "status": "held"
+    },
+    {
+      "at": "2026-10-31T16:39:37.211Z",
+      "status": "held"
+    },
+    {
+      "at": "2026-10-31T16:39:39.255Z",
+      "status": "held"
+    },
+    {
+      "at": "2026-10-31T16:39:41.304Z",
+      "status": "held"
+    },
+    {
+      "at": "2026-10-31T16:39:43.346Z",
+      "status": "held"
+    },
+    {
+      "status": "held",
+      "at": "2026-10-31T16:39:45.387Z"
+    },
+    {
+      "at": "2026-10-31T16:39:47.432Z",
+      "status": "available"
+    }
+  ],
+  "seatId": "6ff59bce-cbc9-45fb-98bb-e886a9d808d5"
+}

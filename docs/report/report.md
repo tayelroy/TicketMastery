@@ -3,10 +3,21 @@ title: "TicketMastery: concert ticketing on AWS"
 subtitle: "IS458 Cloud Management and Engineering, final report"
 author: "Cody, Andrew, Nai Xin, Yan Ting, Shi Hui, Elroy"
 date: "10 November 2026"
+papersize: a4
+margin:
+  x: 2cm
+  y: 2cm
+fontsize: 10pt
 ---
 
-<!-- Draft. Numbers come from the repo docs and the proposal; anything we still have to measure is marked
-     EVIDENCE or MONITORING in an HTML comment. Export: pandoc report.md -o report.docx / report.pdf. -->
+```{=typst}
+#show table: set text(size: 8pt)
+#show raw: set text(size: 8pt)
+```
+
+<!-- Export from docs/report/: pandoc report.md -o report.pdf --pdf-engine=typst ; pandoc report.md -o report.docx.
+     Numbers come from the repo docs and the proposal. EVIDENCE comments mark measurements still to paste in from
+     loadtest/results/ and docs/report/evidence/. -->
 
 # 1. Executive summary
 
@@ -15,258 +26,230 @@ course's *Online Shopping System* theme. Ticket sales are spiky: a popular on-sa
 fans in its first minutes, about 10× normal load. The platform must stay up during that spike and must never sell a
 seat twice.
 
-We built it on AWS in ap-southeast-1 (Singapore). CloudFront and WAF serve the static React app from S3 and pass
-`/api/*` to an API Gateway HTTP API. API Gateway checks Cognito tokens and reaches an internal Application Load
-Balancer through a VPC link. Behind the ALB, one ECS Fargate service (`ticketmastery-api`) hosts all five use cases
-and stores concerts, seats and orders in RDS PostgreSQL. Two pieces run outside the request path:
+The stack runs in ap-southeast-1 (Singapore):
 
-- **Virtual waiting room:** SQS FIFO, DynamoDB and the `queue-manager` Lambda on an EventBridge schedule. It admits
-  fans in batches, so the spike never reaches the database at once.
-- **E-ticket pipeline:** SNS → SQS → the `ticket-fn` Lambda → S3 and SES. It takes PDF rendering and email off the
+- **Front end:** CloudFront and WAF serve the React single-page app from S3 and forward `/api/*` to an API Gateway
+  HTTP API.
+- **API:** API Gateway checks Cognito tokens and reaches an internal Application Load Balancer through a VPC link.
+  Behind the ALB, one ECS Fargate service (`ticketmastery-api`) hosts all five use cases. Concerts, seats and orders
+  are stored in RDS PostgreSQL.
+
+Two event-driven parts sit beside the request path:
+
+- **Virtual waiting room:** SQS FIFO, DynamoDB, and the `queue-manager` Lambda run every minute by EventBridge
+  Scheduler. It admits 500 fans per concert per minute, so the spike never reaches the database at once.
+- **E-ticket pipeline:** SNS → SQS → the `ticket-fn` Lambda → S3 and SES. It keeps PDF rendering and email off the
   checkout path.
 
-**Zero double-booking** comes from one rule: a seat hold is a single all-or-nothing `UPDATE` in the same database as
-the seats and orders.
+**No seat is ever sold twice**, because a seat hold is one all-or-nothing SQL `UPDATE` in the same database as the
+seats and orders.
 
-The report shows two designs:
+The report presents two designs, both built from the same Terraform; a block of variables switches between them:
 
 - **Target high-availability (HA) design:** two AZs, private subnets with a NAT gateway per AZ, autoscaling 2–4+
-  tasks, Multi-AZ RDS. It would cost about USD 190/month.
-- **Implementation mode:** what the instructor asked us to deploy at the proposal review. One AZ, no NAT gateway, one
-  task, single-AZ RDS, about USD 69/month for the base stack.
+  tasks, Multi-AZ RDS; ≈ USD 194/month for the whole stack.
+- **Implementation mode:** what the instructor asked us to deploy at the proposal review. One AZ, no NAT gateway,
+  one task, single-AZ RDS; ≈ USD 72/month for the whole stack (≈ 62 of it the base stack).
 
-Both designs come from the same Terraform; a block of variables switches between them. Section 3 shows both
-diagrams. Section 7 says which availability targets are therefore design-only.
+Section 3 shows both diagrams. Section 7 says which availability targets are therefore design-only.
 
 Operations are managed as code:
 
-- Terraform modules with shared S3 remote state and locking.
-- GitHub Actions for the frontend.
-- CODEOWNERS-based review.
-- CloudWatch alarms and a dashboard that email through SNS.
-- AWS Budgets at USD 20/40/60/80.
+- Terraform modules with shared S3 remote state and locking;
+- a GitHub Actions deploy for the frontend over OIDC;
+- review routed by CODEOWNERS;
+- 20 CloudWatch alarms and a dashboard, alerting by email through SNS;
+- AWS Budgets at USD 20/40/60/80;
+- k6 tests and failure drills for every NFR.
 
 # 2. Business context and requirements
 
-## 2.1 Business context and goal
+## 2.1 Context, users and goal
 
-TicketMastery serves three kinds of user (Google Doc, *Customer Base*):
+TicketMastery has three kinds of user (Google Doc, *Customer Base*):
 
 - **Guests** browse concerts without signing in.
 - **Fans** (registered users) join waiting rooms, buy tickets and download e-tickets.
 - **Organisers** (internal staff, Cognito group `organisers`) create concerts, ticket types and seat layouts, and
   watch sales live.
 
-Business goal (Google Doc): fans buy tickets *"without the platform buckling under traffic spikes, with every seat
-sold to exactly one buyer"*, checkout stays secure, e-tickets arrive within seconds, and organisers see pricing,
+The business goal (Google Doc): fans buy tickets *"without the platform buckling under traffic spikes, with every seat
+sold to exactly one buyer"*. Checkout stays secure, e-tickets arrive within seconds, and organisers see pricing,
 inventory and sales in real time.
 
 ## 2.2 Base requirement and traffic model
 
-The specification's base requirement for the Online Shopping System theme is: *the company covers Asia-Pacific; 80%
-of its customers are from Singapore; the remainder are split evenly between Malaysia, Thailand and Hong Kong.*
+The specification's base requirement for this theme: *the company covers Asia-Pacific; 80% of its customers are from
+Singapore; the remainder are split evenly between Malaysia, Thailand and Hong Kong.*
 
-During the proposal we drafted a different split (Google Doc, *Traffic model and APAC split*): Singapore 60%,
-Malaysia 20%, Indonesia/Thailand/Philippines 15%, rest of APAC 5%. It was labelled "team assumption, to confirm".
-**This report uses the specification's split**, because it is the base requirement we are assessed against:
+During the proposal we drafted a different split (Google Doc, *Traffic model*): Singapore 60%, Malaysia 20%,
+Indonesia/Thailand/Philippines 15%, rest of APAC 5%. It was labelled "team assumption, to confirm". **This report
+uses the specification's split**, because that is the base requirement we are assessed against.
 
-| Origin | Share of customers | How it is served |
+| Origin | Share | How it is served |
 |---|---|---|
 | Singapore | 80% | CloudFront edge in Singapore; API in ap-southeast-1 |
-| Malaysia | ≈ 6.7% | CloudFront edge; dynamic calls on the AWS backbone to Singapore |
-| Thailand | ≈ 6.7% | CloudFront edge; as above |
-| Hong Kong | ≈ 6.7% | CloudFront edge; as above |
+| Malaysia, Thailand, Hong Kong | ≈ 6.7% each | CloudFront edge in-country; dynamic calls cross the AWS backbone to Singapore |
 
-The design conclusion is the same under either split. With most demand in Singapore, one region (ap-southeast-1) and
-CloudFront edges for the rest of APAC are enough. The earlier serverless write-up estimated round trips from
-Singapore of about 10 ms to Kuala Lumpur and 30–40 ms to Bangkok and Hong Kong. That is well inside the 300 ms p95
-target (NFR-1). The distribution uses `PriceClass_200` (`infra/modules/edge`), which includes edge locations in all
+The design conclusion is the same under either split: one region plus CloudFront edges is enough. Our earlier
+serverless write-up estimated round trips from Singapore of about 10 ms to Kuala Lumpur and 30–40 ms to Bangkok and
+Hong Kong, well inside the 300 ms p95 target. The distribution uses `PriceClass_200`, which has edge locations in all
 four markets.
 
 Load assumptions for one major on-sale (Google Doc):
 
 | Phase | Concurrent users | Absorbed by |
 |---|---|---|
-| Normal day | ≈ 5,000 | CloudFront for static content; ALB + minimum task count for the API |
-| First 10 minutes of a major on-sale | 50,000–100,000 | Waiting room (SQS FIFO + DynamoDB); CloudFront serves the waiting page; fans are admitted in batches of 500 per minute |
+| Normal day | ≈ 5,000 | CloudFront for static content; ALB and the minimum number of tasks for the API |
+| First 10 minutes of a major on-sale | 50,000–100,000 | The waiting room queues them, CloudFront serves the waiting page, and 500 per concert are admitted each minute |
 
-## 2.3 Use cases
+## 2.3 Use cases and functional requirements
 
-The proposal listed ten fan use cases, two admin and six system use cases (Google Doc). We grouped them into five
-deliverable use cases. Each one is a module in the API and a folder in the frontend:
+The proposal listed ten fan, two admin and six system use cases. We grouped them into five deliverable use cases.
+Each is one API module and one frontend folder, with one owner:
 
-| UC | Name | Covers (proposal use cases) | Owner |
+| UC | Name | Owner | Functional requirements |
 |---|---|---|---|
-| UC1 | Concert discovery | Browse, search and filter concerts; concert details; seat map | Cody, Nai Xin |
-| UC2 | My Tickets & Account | Register, sign in and out; order history; view and download e-tickets | Andrew |
-| UC3 | Virtual waiting room | Join the queue, live position, batch admission, admission expiry | Yan Ting |
-| UC4 | Seat selection & checkout | Hold seats for 10 min; simulated payment; confirm; e-ticket by email | Shi Hui |
-| UC5 | Concert & ticket management | Create, edit, publish and cancel concerts; ticket types, prices, layouts; live dashboard; reporting | Elroy |
+| UC1 | Concert discovery | Cody, Nai Xin | FR-1 list published concerts, with search (`q`, artist, venue) and date filters; detail with ticket types, prices and availability. FR-2 seat map showing available, held and sold seats (an expired hold shows as available) |
+| UC2 | My Tickets & Account | Andrew | FR-3 sign up, sign in and sign out with Cognito (email verification). FR-4 list the fan's confirmed orders, open an e-ticket, download its PDF through a short-lived link |
+| UC3 | Virtual waiting room | Yan Ting | FR-5 join, see the queue position, be admitted in arrival order in batches. FR-6 only admitted fans may hold seats; admission lasts 15 minutes |
+| UC4 | Seat selection & checkout | Shi Hui | FR-7 hold 1–20 seats for 10 minutes, all or nothing, one active hold per fan per concert. FR-8 simulated payment: success sells the seats, failure or timeout releases them. FR-9 email the e-ticket PDF after payment |
+| UC5 | Concert & ticket management | Elroy | FR-10 create, edit, publish and cancel concerts; ticket types and seat layout, locked once the sale opens. FR-11 live available, held and sold counts and revenue. FR-12 sales reporting for a BI tool |
 
-The system use cases (autoscaling, flash-sale queue, monitoring, caching, load balancing, failure handling) are
-covered in Sections 7 and 8.
+The six system use cases (autoscaling, flash-sale queue, monitoring, caching, load balancing, failure handling) are
+covered in Sections 7 and 8. Payment is simulated: the proposal scoped real payment as design-only.
 
-## 2.4 Functional requirements
+## 2.4 Non-functional requirements
 
-| # | Requirement | UC |
+These are the proposal's NFRs (Google Doc). Section 10 has the method and the result for each one.
+
+| # | Category | Target |
 |---|---|---|
-| FR-1 | List upcoming published concerts with search (`q`, artist, venue) and date filters; show details, ticket types, prices and availability | UC1 |
-| FR-2 | Show the seat map with available, held and sold seats; holds that have expired show as available | UC1 / UC4 |
-| FR-3 | Sign up, sign in and sign out with Cognito (email verification); organisers are a Cognito group | UC2 |
-| FR-4 | List the fan's confirmed orders and open any e-ticket; download its PDF through a short-lived link | UC2 |
-| FR-5 | Join a concert's waiting room, see the queue position, and be admitted in arrival order in batches | UC3 |
-| FR-6 | Only admitted fans may hold seats; admission expires after 15 minutes | UC3 / UC4 |
-| FR-7 | Hold 1–20 seats for 10 minutes, all or nothing; at most one active hold per fan per concert | UC4 |
-| FR-8 | Simulate payment success or failure; success sells the seats and confirms the order; failure or timeout releases them | UC4 |
-| FR-9 | Email the e-ticket PDF after payment, exactly once per order | UC4 |
-| FR-10 | Organisers create draft concerts, set ticket types and the seat layout, publish, and cancel (also after the sale opens); the layout locks once the sale opens | UC5 |
-| FR-11 | Organisers see live available, held and sold counts and revenue per ticket type | UC5 |
-| FR-12 | Sales reporting by concert, ticket type and day for a BI tool | UC5 |
-
-Payment goes through a simulated gateway (the proposal scoped real payment as design-only; see Section 12).
-
-## 2.5 Non-functional requirements
-
-The NFR table below is the one from the proposal (Google Doc). The last column says how each one is evidenced in this
-report.
-
-| # | Category | Target | Evidence (Section 10) |
-|---|---|---|---|
-| NFR-1 | Performance | Browse and seat-map APIs: p95 < 300 ms, p99 < 800 ms at baseline | k6 browse test; ALB `TargetResponseTime` |
-| NFR-2 | Scalability | Sustain 10× baseline; scale-out within 5 min; 0 dropped requests at the admitted rate | k6 burst test with autoscaling enabled for the run; ECS scaling activity |
-| NFR-3 | Correctness | 0 oversold seats across all tests | Concurrent hold test + SQL check: no seat in two confirmed orders |
-| NFR-4 | Hold accuracy | Seat available again within 30 s of hold expiry | Hold-expiry script + DB check |
-| NFR-5 | Availability | 99.9% monthly for the purchase path; no outage on the loss of one instance or one AZ | Instance loss: drill F1. AZ loss: design-only in implementation mode (Section 7) |
-| NFR-6 | Fairness | Admission order matches queue order | Waiting-room log comparison |
-| NFR-7 | Delivery | 95% of e-ticket emails sent within 60 s of payment | SQS `ApproximateAgeOfOldestMessage`, `ticket-fn` logs, SES metrics |
-| NFR-8 | RPO | Paid orders: 0 on AZ loss; ≤ 30 min on data corruption; ≤ 24 h on region loss | RDS point-in-time restore drill F4; AZ and region loss are design-only |
-| NFR-9 | RTO | AZ loss ≤ 5 min; data corruption ≤ 1 h; region loss ≤ 4 h (design only) | Drills F1 and F4 |
-| NFR-10 | Security | HTTPS everywhere; encryption at rest; DB only in private subnets | Configuration review (Section 9.5) |
-| NFR-11 | Cost | Total project spend under USD 80 | AWS Budgets and the billing console |
+| NFR-1 | Performance | Browse and seat-map APIs: p95 < 300 ms, p99 < 800 ms at baseline |
+| NFR-2 | Scalability | Sustain 10× baseline; scale-out within 5 min; 0 dropped requests at the admitted rate |
+| NFR-3 | Correctness | 0 oversold seats across all tests |
+| NFR-4 | Hold accuracy | Seat available again within 30 s of hold expiry |
+| NFR-5 | Availability | 99.9% monthly for the purchase path; no outage on the loss of one instance or one AZ |
+| NFR-6 | Fairness | Admission order matches queue order |
+| NFR-7 | Delivery | 95% of e-ticket emails sent within 60 s of payment |
+| NFR-8 | RPO | Paid orders: 0 on AZ loss; ≤ 30 min on data corruption; ≤ 24 h on region loss |
+| NFR-9 | RTO | AZ loss ≤ 5 min; data corruption ≤ 1 h; region loss ≤ 4 h (design only) |
+| NFR-10 | Security | HTTPS on public paths; encryption at rest; DB only in private subnets |
+| NFR-11 | Cost | Total project spend under USD 80 |
 
 # 3. Architecture
 
 ## 3.1 From the serverless proposal to containers and RDS
 
 Our first write-up was all-serverless: API Gateway REST and WebSocket APIs, one Lambda per module, and DynamoDB for
-concerts, seats and orders, with conditional writes and `TransactWriteItems` for seat locking. We kept the parts of
-its reasoning that still hold:
+concerts, seats and orders. Much of its reasoning still holds, and we kept it:
 
 - one region with CloudFront for APAC;
-- a WAF in front of a single public entry point;
+- WAF on the single public entry point;
 - SQS FIFO for the queue;
-- SNS/SQS fan-out for e-tickets with idempotent consumers;
-- Cognito.
+- SNS/SQS fan-out to idempotent consumers;
+- Cognito for sign-in.
 
-We moved the core to **ECS Fargate + RDS PostgreSQL** for four reasons:
+We moved the core to **ECS Fargate + RDS PostgreSQL** for four reasons.
 
-1. **Correctness is easier to prove in SQL.** A seat hold is one `UPDATE … WHERE status = 'available' OR (held and
-   expired)` with a row-count check. Seats, ticket types and orders sit in one database. Confirming a payment, cancelling
-   a concert and freezing the layout are each one transaction, guarded by foreign keys, check constraints and triggers.
-   In DynamoDB the same guarantees need careful single-table design. `TransactWriteItems` is limited to 100 items per
-   transaction, and organiser reporting would need a second store or exports.
-2. **Organiser reporting is relational.** Sales by concert, ticket type and day are SQL views that a BI tool
-   (QuickSight) reads directly.
-3. **It covers more of the course.** A VPC with public and private subnets, security-group chaining, a load balancer,
-   container autoscaling and Multi-AZ failover are central topics. The serverless design had nothing to put in a VPC.
-4. **The cost is predictable** at our scale (Section 4), and one API language (TypeScript) is shared with the
-   frontend.
+1. **Correctness is easier to prove in SQL.** A hold is one conditional `UPDATE` with a row-count check. Confirming,
+   cancelling and locking the layout are each one transaction, guarded by foreign keys, check constraints and
+   triggers. In DynamoDB the same guarantees need careful single-table design, `TransactWriteItems` is capped at 100
+   items, and reporting needs exports.
+2. **Organiser reporting is relational.** Sales by concert, ticket type and day are SQL views (Section 6.5).
+3. **It covers the course's infrastructure topics.** The serverless design had nothing to put in a VPC, so it showed
+   no subnets, security-group chains, load balancer, container autoscaling or Multi-AZ failover.
+4. **The cost is predictable at our scale**, and the API is TypeScript like the frontend.
 
-We kept serverless where it fits best: the waiting room (DynamoDB scales with the spike without loading the single
-database; this was also the instructor's suggestion, Section 11) and the asynchronous e-ticket worker.
+We kept serverless where it fits best:
 
-The trade-off: ECS and RDS cost money while idle and scale more slowly than Lambda. The waiting room (Section 6.2) is
-what makes that acceptable, because it caps the request rate that reaches the API.
+- **The waiting room**, because DynamoDB absorbs the spike without loading the single database; it was also the
+  instructor's suggestion.
+- **The asynchronous e-ticket worker.**
+
+The trade-off is that containers and RDS cost money while idle and scale more slowly than Lambda. The waiting room
+makes that acceptable, because it caps how many buyers reach the API.
 
 ## 3.2 Target HA design
 
-![Figure 1. Target HA architecture (design; source `figures/target-ha-architecture.mmd`).](figures/target-ha-architecture.png){width=62%}
+![Figure 1. Target HA architecture (design; source `figures/target-ha-architecture.mmd`).](figures/target-ha-architecture.png){height=21cm}
 
-- **Edge.** Route 53 → CloudFront (`PriceClass_200`, HTTPS redirect) with a WAF web ACL (AWS managed common rule set +
-  a rate-based rule at 2,000 requests per 5 minutes per IP). Static content comes from a private S3 bucket through
-  Origin Access Control. `/api/*` and `/health` go to API Gateway.
-- **API front door.** API Gateway HTTP API. Public routes (`GET /api/concerts…`, `GET /health`) need no token. All
-  other `/api/*` routes need a Cognito access token (JWT authorizer). The stage has throttling (100 rps steady, 200
-  burst) and JSON access logs. A **VPC link** reaches an **internal** ALB, so the ALB is never internet-facing.
-- **Compute.** One ECS Fargate service, `ticketmastery-api` (Node 20, Express, TypeScript). It runs at least 2 tasks,
-  one per AZ, in **private** subnets. Autoscaling uses CPU and ALB request-count target tracking. Egress to ECR,
-  CloudWatch Logs, Secrets Manager and Cognito goes through a NAT gateway per AZ (or VPC interface endpoints).
-- **Data.** RDS PostgreSQL 16 **Multi-AZ** (synchronous standby, automatic failover), 7-day backups with
-  point-in-time restore, deletion protection, encrypted storage. The master password is managed by RDS in Secrets
-  Manager.
-- **Waiting room.** SQS FIFO `join-queue` → `queue-manager` (Python) → DynamoDB `live-queue`. EventBridge Scheduler
-  runs it every minute during the sale window.
-- **E-tickets.** SNS `order-events` → SQS `ticket-queue` (DLQ after 5 failures) → `ticket-fn` (Node 20, outside the
-  VPC) → S3 `tickets/<orderId>.pdf` + SES email.
-- **Operations.** CloudWatch alarms and a dashboard, SNS `alerts` to email, AWS Budgets. QuickSight with a VPC
-  connection to RDS for reporting (design-only, Section 12).
+- **Edge.** Route 53 → CloudFront (`PriceClass_200`, redirect to HTTPS) with a WAF web ACL: the AWS managed common
+  rule set plus an IP rate rule at 2,000 requests per 5 minutes. The SPA comes from a private S3 bucket through
+  Origin Access Control (OAC). `/api/*` and `/health` go to API Gateway.
+- **API front door.** API Gateway HTTP API.
+  - `GET /api/concerts…` and `GET /health` are public. Every other `/api/*` route, the waiting room included, needs a
+    Cognito access token (JWT authorizer).
+  - The stage throttles at 100 rps steady and 200 burst, and writes JSON access logs.
+  - A **VPC link** reaches an **internal** ALB, so the ALB is never internet-facing.
+- **Compute.** One ECS Fargate service (Node 20, Express, TypeScript): at least two tasks, one per AZ, in private
+  subnets, with CPU and request-count autoscaling. Egress goes through a NAT gateway per AZ (or interface endpoints).
+- **Data.** RDS PostgreSQL 16 Multi-AZ (synchronous standby, automatic failover), 7-day point-in-time recovery,
+  deletion protection, encrypted storage. RDS manages the master password in Secrets Manager.
+- **Waiting room.** SQS FIFO `join-queue` → `queue-manager` (Python 3.13, in the VPC) → DynamoDB `live-queue`.
+  EventBridge Scheduler (`rate(1 minute)`) runs the admit step.
+- **E-tickets.** SNS `order-events` → SQS `ticket-queue` (DLQ after 5 receives) → `ticket-fn` (Node.js 22, arm64,
+  outside the VPC) → S3 `tickets/<orderId>.pdf` + SES.
+- **Operations.** CloudWatch alarms and a dashboard → SNS `alerts` → email. AWS Budgets. QuickSight over a VPC
+  connection for reporting (design only, Section 12).
 
 ## 3.3 Implementation mode (deployed)
 
-At the proposal review the instructor asked us to **skip the NAT gateway, use one AZ, and not implement HA, but still
-show the HA design** (`docs/architecture.md`, *Implementation vs target (HA) design*). The Terraform defaults build
-that:
+At the proposal review the instructor asked us to **skip the NAT gateway, use one AZ and not implement HA, but still
+show the HA design**. The Terraform defaults build exactly that.
 
-![Figure 2. Deployed implementation (source `figures/implementation-architecture.mmd`).](figures/implementation-architecture.png){width=58%}
+![Figure 2. Deployed implementation (source `figures/implementation-architecture.mmd`).](figures/implementation-architecture.png){height=19cm}
 
 | Aspect | Implementation (deployed) | Target HA | Variable(s) |
 |---|---|---|---|
-| Task subnets | AZ a public subnet, public IP for egress only | Private subnets in AZ a + b | `tasks_in_public_subnets`, `tasks_single_az` |
+| Task subnets | AZ a public subnet; public IP used only for egress | Private subnets, AZ a + b | `tasks_in_public_subnets`, `tasks_single_az` |
 | Task egress | Own public IP via the internet gateway | NAT per AZ or interface endpoints | `enable_nat_gateway`, `single_nat_gateway`, `enable_vpc_endpoints` |
-| Task count / scaling | 1 task, autoscaling off | ≥ 2 tasks, autoscaling 2–4+ | `desired_count`, `enable_autoscaling`, `autoscaling_min/max_capacity` |
+| Tasks / scaling | 1 task, autoscaling off (on only for the burst test) | ≥ 2 tasks, autoscaling 2–4+ | `desired_count`, `enable_autoscaling`, `autoscaling_*_capacity` |
 | Database | Single-AZ, pinned to AZ a, 1-day backups | Multi-AZ, 7-day backups, deletion protection | `db_multi_az`, `db_backup_retention_period`, `db_deletion_protection` |
-| Cost (estimate) | ≈ USD 69/month | ≈ USD 190/month | `docs/cost-estimate.md` |
+| Cost (estimate, whole stack) | ≈ USD 72/month | ≈ USD 194/month | `docs/cost-estimate.md` |
 
-Two design points are specific to this mode:
-
-- **The task's public IP is not an open door.** The task security group has exactly one ingress rule: the container
-  port, from the ALB security group. The public IP is used only for outbound calls. RDS stays in private subnets with
-  `publicly_accessible = false`.
-- **Lambdas and the VPC.** A Lambda attached to a VPC never gets a public IP, so with no NAT it can reach only what the
-  free S3 and DynamoDB **gateway endpoints** cover. So `ticket-fn` runs outside the VPC (it needs SQS, S3, SES and
-  Cognito). `queue-manager` runs in the private subnets. Its SQS input arrives through an event source mapping (the
-  Lambda service polls the queue), and it writes DynamoDB through the gateway endpoint. It publishes its metric as a
-  structured log line (CloudWatch Embedded Metric Format), because it cannot call the CloudWatch API (Section 8).
-
-Two public and two private subnets still exist: an ALB needs two AZs, and an RDS subnet group must span two AZs. In
-implementation mode only the second ALB node and an empty DB-subnet-group member sit in AZ b.
+- **The task's public IP is not an open door.** The task security group has one ingress rule: the container port,
+  from the ALB security group. RDS stays private (`publicly_accessible = false`).
+- **Why there are still two subnets of each kind.** An ALB needs subnets in two AZs, and an RDS subnet group must
+  span two AZs. In implementation mode AZ b holds only the second ALB node and an empty member of the DB subnet group.
+- **Lambdas and the VPC.** A Lambda attached to a VPC never gets a public IP, so with no NAT it reaches only what the
+  free S3 and DynamoDB gateway endpoints cover.
+  - `ticket-fn` needs SQS, S3, SES and Cognito, so it runs **outside** the VPC.
+  - `queue-manager` runs in the private subnets. Its SQS input arrives through an event source mapping (the Lambda
+    service polls the queue), it writes DynamoDB through the gateway endpoint, and it publishes its metric as a log
+    line in CloudWatch Embedded Metric Format (EMF), because it cannot call the CloudWatch API.
 
 # 4. Resource allocation and justification
 
-Sizing follows the implementation mode. Monthly costs are on-demand list prices for ap-southeast-1, 730 h/month,
-taken from `docs/cost-estimate.md` (estimates, not bills).
+The table sizes the implementation mode. Prices are on-demand list prices for ap-southeast-1 at 730 h/month, from
+`docs/cost-estimate.md` and the module READMEs. They are estimates, not bills.
 
-| Layer | Service and configuration | Why this service | Why this size | ≈ USD/month |
-|---|---|---|---|---|
-| Edge | CloudFront `PriceClass_200`; SPA cache policy (default TTL 1 day, max 1 year; hashed assets immutable) | Edges in SG, MY, TH and HK; TLS close to fans; absorbs browse traffic | Price class 200 is the cheapest class that covers all four markets | pay per request |
-| Edge security | WAF web ACL: AWS common rule set + IP rate limit 2,000 / 5 min | Blocks common exploits and simple floods before they reach the API | One ACL, two rules | ≈ 5 + 1 per rule (fixed) |
-| Static site | S3 private bucket + OAC | Static SPA, no servers | n/a | < 1 |
-| Identity | Cognito user pool, `organisers` group, email verification | Managed sign-up and sign-in, JWTs that API Gateway validates | n/a | free tier |
-| API front door | API Gateway HTTP API, JWT authorizer, VPC link, 100 rps / 200 burst throttle | Central API management (instructor feedback a); auth before compute; HTTP API's VPC link supports an ALB directly (REST would need an extra NLB, ≈ USD 18+/month) | Throttle sized to protect one 0.25 vCPU task | pay per request |
-| Load balancer | Internal ALB, health check `/health` (DB `SELECT 1`) | Spreads requests over tasks and AZs; removes unhealthy tasks | 1 ALB | 24.2 |
-| Compute | ECS Fargate, 1 task × 0.25 vCPU / 0.5 GB, x86_64; autoscaling (off in implementation) CPU 60% and 500 requests per task per minute targets | No servers to patch; per-second billing; scales by task | Smallest Fargate size; enough for demo traffic; the burst test (NFR-2) checks the scaled size | 11.3 |
-| Public IPv4 | 2 for the ALB + 1 for the task | Replaces a NAT gateway (≈ 43/month per AZ) | n/a | 10.95 |
-| Database | RDS PostgreSQL 16 `db.t4g.micro`, 20 GB gp3, encrypted, single-AZ (Multi-AZ in target) | Transactions for zero double-booking; relational reporting | Smallest Graviton class; data fits easily in 20 GB | 18.3 + 2.8 |
-| Secrets | Secrets Manager (RDS-managed master secret) | Password never in code or state | 1 secret | 0.4 |
-| Registry | ECR, scan on push, keep last 10 images | Private images for Fargate | < 1 GB | 0.1 |
-| Logs | CloudWatch Logs, 14-day retention | Central logs for API, API Gateway and Lambdas | ≈ 1 GB | 0.7–1.0 |
-| Waiting room | SQS FIFO `join-queue` (+ DLQ after 3), DynamoDB `live-queue`, `queue-manager` Python 3.13, 128 MB, 30 s timeout, batch 10; EventBridge Scheduler every minute in the sale window | FIFO keeps arrival order per concert; DynamoDB scales with the spike without loading RDS | One schedule ≈ 43,800 runs/month, inside the 14 M free tier | ≈ 0 |
-| E-tickets | SNS `order-events` → SQS `ticket-queue` (visibility 6× the Lambda timeout, DLQ after 5, 14-day DLQ retention) → `ticket-fn` (Node 20, outside the VPC) → private S3 + SES | Async: checkout doesn't wait for PDF or email; retries and DLQ are built in | Pay per message | ≈ 0 |
-| Monitoring | CloudWatch alarms + dashboard, SNS `alerts` email, AWS Budgets | Section 8 | <!-- MONITORING: alarm count and dashboard cost from modules/monitoring README --> | <!-- MONITORING: from modules/monitoring README --> |
-| **Base stack total** | | | | **≈ 69** (≈ 2.3/day) |
+| Layer | Service and configuration | Justification | ≈ USD/month |
+|---|---|---|---|
+| Edge | CloudFront `PriceClass_200`; SPA cached 1 day (hashed assets 1 year) | Cheapest price class with edges in SG, MY, TH and HK; TLS close to fans; absorbs browse traffic | per request |
+| Edge security | WAF: AWS common rules + IP rate limit 2,000 / 5 min (3 rules) | Blocks exploits and single-source floods before they reach the API | ≈ 8 (5 per ACL + 1 per rule) |
+| Static site | Private S3 + OAC | No servers for static content | < 1 |
+| Identity | Cognito user pool, `organisers` group, email verification | Managed sign-in; JWTs that API Gateway validates | free tier |
+| API front door | API Gateway HTTP API, JWT authorizer, VPC link, throttle 100 rps / 200 burst | Central API management (instructor feedback a). Auth before compute. An HTTP API's VPC link targets an ALB directly; a REST API would need an extra NLB (≈ 18+). The throttle is sized to protect one 0.25 vCPU task | per request |
+| Load balancer | Internal ALB, health check `/health` (runs DB `SELECT 1`) | Spreads requests over tasks and AZs; takes unhealthy tasks out | 24.2 |
+| Compute | Fargate, 1 × 0.25 vCPU / 0.5 GB, x86_64. Autoscaling targets: CPU 60%, 500 requests per task per minute | No servers to patch; per-second billing. Smallest size; the burst test checks scale-out | 11.3 |
+| Public IPv4 | Task × 1 (the ALB is internal, so it has none) | Replaces a NAT gateway (≈ 43 per AZ) | 3.65 |
+| Database | RDS PostgreSQL 16 `db.t4g.micro`, 20 GB gp3, encrypted, single-AZ | Transactions for zero double-booking; relational reporting. Smallest Graviton class | 18.3 + 2.8 |
+| Secrets, registry, logs | Secrets Manager (RDS-managed secret); ECR (scan on push, keep 10 images); CloudWatch Logs (14 days) | No password in code or state; private images; central logs | 0.4 + 0.1 + ≈ 1 |
+| Waiting room | SQS FIFO `join-queue` (DLQ after 3 tries); DynamoDB `live-queue` (on-demand, TTL); `queue-manager` (128 MB, 30 s, SQS batch 10); Scheduler `rate(1 minute)` | FIFO keeps arrival order per concert. DynamoDB scales with the spike without loading RDS. 43,800 runs/month fit the Scheduler (14 M) and Lambda (1 M) free tiers | ≈ 0 |
+| E-tickets | SNS → SQS `ticket-queue` (visibility 6 × the 60 s timeout, DLQ after 5, DLQ kept 14 days) → `ticket-fn` (Node.js 22 arm64, 256 MB, batch 10, max concurrency 2) → private S3 + SES | Checkout doesn't wait for the PDF or the email. Concurrency 2 respects the SES sandbox rate of 1 email/s | ≈ 0 |
+| Monitoring | 19 alarms in `modules/monitoring` (20 with autoscaling) + the DLQ alarm in `messaging` = 23 alarm metrics; 1 dashboard; 4 custom metrics; SNS email; Budgets | Section 8 | ≈ 1.3 (10 alarm metrics and 10 custom metrics free; dashboard free) |
+| **Whole stack** | | | **≈ 72** (≈ 62 base stack + WAF ≈ 8 + monitoring and pay-per-request ≈ 2; ≈ 2.4/day) |
 
-The target HA design costs **≈ USD 190/month** (≈ 6.3/day). Most of the difference is two NAT gateways and their
-Elastic IPs (≈ 94), Multi-AZ RDS (≈ +21) and a second task (≈ +11). The appendix has the line items.
+The target HA design is **≈ USD 194/month** (≈ 6.4/day; Appendix B). The extra cost is two NAT gateways with their
+Elastic IPs (≈ 94), Multi-AZ RDS (≈ +21) and a second task (≈ +11), minus the task's public IP.
 
-Choices we considered and rejected:
+Alternatives we rejected:
 
-- **NAT gateway vs public-subnet task:** at ≈ USD 43/month per AZ, a NAT gateway would have been the largest single
-  line item. Following the instructor's advice, implementation mode uses the task's public IP instead.
-- **ElastiCache for seat holds** (in the proposal): rejected. A hold in Redis plus an order in RDS is two systems that
-  can disagree. One SQL `UPDATE` cannot.
-- **Interface endpoints instead of NAT:** about the same price for 5 endpoints × 2 AZs (≈ USD 95 vs ≈ 94), so either
-  works in the HA design.
-- **QuickSight:** billed per user per month, so it is design-only (Section 12).
+- **A NAT gateway in implementation mode.** It would have been the largest single line item.
+- **ElastiCache for seat holds** (proposal). A hold in Redis and an order in RDS are two systems that can disagree;
+  one SQL `UPDATE` cannot.
+- **QuickSight.** Billed per user per month, so it stays design-only (Section 12).
 
 # 5. Linkage of resources
 
@@ -274,152 +257,201 @@ Choices we considered and rejected:
 
 | UC | Path |
 |---|---|
-| All (static) | Browser → CloudFront (+ WAF) → S3 via OAC; `index.html` rewritten for SPA routes by a CloudFront function |
-| UC1 | Browser → CloudFront `/api/concerts…` → API Gateway public route → VPC link → ALB → Fargate `discovery` module → RDS (read) |
-| UC2 | Browser → Cognito Hosted UI or SDK (sign in, access token) → CloudFront → API Gateway (JWT authorizer) → ALB → `account` module → RDS (orders); download: API → S3 `GetObject` pre-signed URL (300 s) → browser fetches the PDF from S3 |
-| UC3 | `POST /join` → API → SQS FIFO (`MessageGroupId = concertId`) → `queue-manager` → DynamoDB `live-queue`; `GET /status` → API → DynamoDB `GetItem`; EventBridge Scheduler → `queue-manager` admits batches |
-| UC4 | `POST /api/checkout/holds` → API → DynamoDB (is the fan admitted?) → RDS transaction; `POST …/confirm` → RDS transaction → SNS `order-events` → SQS `ticket-queue` → `ticket-fn` → Cognito (fan's email by `sub`) → S3 `tickets/<orderId>.pdf` → SES |
-| UC5 | Organiser → API Gateway (JWT) → `organiser` module (checks the `organisers` group) → RDS; dashboard polled every 5 s |
+| Static | Browser → CloudFront (+ WAF) → S3 via OAC; a CloudFront function rewrites SPA routes to `index.html` |
+| UC1 | CloudFront `/api/concerts…` → API Gateway public route → VPC link → internal ALB → Fargate `discovery` → RDS |
+| UC2 | Cognito sign-in (access token) → CloudFront → API Gateway (JWT) → ALB → `account` → RDS. Download: the API sends `HeadObject` to S3 for `tickets/<orderId>.pdf` and returns a 300 s pre-signed `GetObject` URL; the browser downloads straight from S3 |
+| UC3 | `POST /join` → API → SQS FIFO (`MessageGroupId` = concert) → `queue-manager` → DynamoDB. `GET /status` → API → DynamoDB `GetItem`. Scheduler → `queue-manager` admit step → DynamoDB |
+| UC4 | `POST /api/checkout/holds` → API → DynamoDB `GetItem` (admitted?) → RDS transaction. `…/confirm` → RDS transaction → SNS `order-events` → SQS `ticket-queue` → `ticket-fn` → Cognito `AdminGetUser` (email) → S3 PDF → SES → S3 `.sent` marker |
+| UC5 | Organiser → API Gateway (JWT) → `organiser` (checks the `organisers` group) → RDS; the dashboard is polled every 5 s |
 
 ![Figure 3. On-sale purchase sequence (source `figures/purchase-sequence.mmd`).](figures/purchase-sequence.png)
 
 ## 5.2 Events
 
-| Producer | Channel | Consumer | Message | Delivery guarantee and failure handling |
-|---|---|---|---|---|
-| API (UC3 join) | SQS FIFO `join-queue` | `queue-manager` | `{ eventId, userId, joinedAt }`; group = concert, dedup = hash of `userId#concertId` | Ordered per concert; duplicates within 5 min dropped; DLQ after 3 tries |
-| EventBridge Scheduler | Schedule (1 min, sale window) | `queue-manager` | Scheduled event | At-least-once; admitting is idempotent (status change only from `WAITING`) |
-| API (UC4 confirm) | SNS `order-events` → SQS `ticket-queue` | `ticket-fn` | `OrderConfirmed` | At-least-once; partial batch failures; DLQ after 5; S3 write with `If-None-Match: *` so a retry never emails twice |
-| `queue-manager` | CloudWatch Logs (Embedded Metric Format) | CloudWatch metric `TicketMastery/WaitingRoomSize` | JSON log line per run | Feeds the waiting-room alarm |
-| CloudWatch alarms, Budgets | SNS `alerts` | Email | Alarm and budget notifications | Section 8 |
+| Producer → channel → consumer | Message | Guarantees and failure handling |
+|---|---|---|
+| API → SQS FIFO `join-queue` → `queue-manager` | `{ eventId, userId, joinedAt, saleStartsAt, saleEndsAt }`. Group = concert; dedup ID = hash of `userId#concertId` | In order per concert; duplicates dropped. If a record fails, it and every record after it are retried, so nobody overtakes. DLQ after 3 tries (alarmed) |
+| EventBridge Scheduler → `queue-manager` | Scheduled admit run every minute | Async, retries off (the next run is a minute away). Admits are conditional on `status = WAITING`, so overlapping runs never admit anyone twice |
+| API → SNS `order-events` → SQS `ticket-queue` → `ticket-fn` | `OrderConfirmed` v1 (attribute `eventType`; other types are skipped) | At-least-once delivery. Partial batch failures; DLQ after 5 (alarmed); `tickets/<orderId>.sent` marker so redeliveries do nothing |
+| `queue-manager`, `ticket-fn` → CloudWatch Logs (EMF) | `TicketMastery/WaitingRoomSize`, `TicketMastery/ETicketDeliveryLatency` | Metrics without API calls; used by alarms and the dashboard |
+| Alarms, Budgets → SNS `alerts` / email | ALARM and OK transitions | Section 8 |
 
 ## 5.3 IAM
 
-Each component has its own role with least-privilege inline policies. Modules attach their policies to the API task
-role by name, so access is granted by the module that owns the resource:
+Each component has its own role with least-privilege inline policies. The module that owns a resource also grants
+the API task role access to it, so permissions sit next to the resource.
 
-| Principal | Allowed | Granted by |
+| Principal | Allowed | Granted in |
 |---|---|---|
-| ECS execution role | Pull from ECR, write its log group, read the RDS master secret | `ecs-service` |
-| API task role | `sqs:SendMessage` on `join-queue`; DynamoDB read on `live-queue`; `sns:Publish` on `order-events`; `s3:GetObject` on `tickets/*` and `s3:ListBucket` on the e-ticket bucket | `waiting-room`, `messaging` |
-| `queue-manager` role | Receive/delete on `join-queue`; read/write `live-queue`; VPC ENI management; logs | `waiting-room` |
-| `ticket-fn` role | Receive/delete on `ticket-queue`; `s3:PutObject` on `tickets/*`; SES send from the verified identity; Cognito user lookup; logs | `messaging` |
-| GitHub Actions deploy role | OIDC-federated (no stored keys); sync the frontend bucket and invalidate the distribution | `github-deploy` |
-| API Gateway | VPC link to the internal ALB only | `auth-apigw` |
+| ECS execution role | ECR pull, its log group, read the RDS master secret | `ecs-service` |
+| API task role | `sqs:SendMessage` on `join-queue`; `dynamodb:GetItem` on `live-queue` (status and the admission check); `sns:Publish` on `order-events`; `s3:GetObject` on `tickets/*` + `s3:ListBucket`, so a missing PDF answers 404 rather than 403; `ssmmessages:*` for ECS Exec | `waiting-room`, `messaging`, `ecs-service` |
+| `queue-manager` | Receive and delete on `join-queue`; `GetItem/PutItem/UpdateItem/Query` on `live-queue` and its indexes; VPC ENIs; logs | `waiting-room` |
+| Scheduler role | `lambda:InvokeFunction` on `queue-manager` only | `waiting-room` |
+| `ticket-fn` | Receive and delete on `ticket-queue`; S3 get/put on `tickets/*` + list; `ses:SendEmail` with the condition `ses:FromAddress` = the sender; `cognito-idp:AdminGetUser` on the pool; its log group | `messaging` |
+| GitHub Actions | OIDC, `main` branch only: list/put/delete in the frontend bucket, `CreateInvalidation` on the distribution | `github-deploy` |
 
 ## 5.4 Network
 
-- **Security groups chain:** VPC-link SG → `alb_sg` (port 80) → `ecs_sg` (container port only) → `rds_sg` (5432
-  only, plus `rds_extra_ingress_sg_ids` for in-VPC Lambdas that need RDS).
-- **Routing:** public subnets route to the internet gateway. Private subnets have no internet route in implementation
-  mode; they carry the free S3 and DynamoDB gateway endpoints. In the HA design they route through a NAT gateway per
-  AZ.
-- **TLS:** CloudFront terminates HTTPS (`redirect-to-https`) and calls API Gateway over HTTPS (TLS 1.2). The API
-  connects to RDS with `DB_SSL=true`.
+- **Security-group chain:** VPC link SG → `alb_sg` (port 80) → `ecs_sg` (container port only) → `rds_sg` (5432
+  only, plus `rds_extra_ingress_sg_ids` for in-VPC consumers).
+- **Routing:**
+  - Public subnets route to the internet gateway.
+  - Private subnets have no internet route in implementation mode; they carry the free S3 and DynamoDB gateway
+    endpoints.
+  - In the HA design, private subnets route through a NAT gateway per AZ.
+- **Encryption in transit:**
+  - **Encrypted:** browser → CloudFront (HTTPS, redirect from HTTP); CloudFront → API Gateway (TLS 1.2); API → RDS
+    (`DB_SSL=true`); every AWS SDK call.
+  - **Plain HTTP:** VPC link → internal ALB → task, on port 80, inside the VPC only (Section 9.5).
 
 # 6. Implementation per use case and key mechanisms
 
 ## 6.1 Code structure
 
-One service, five modules (`src/modules/<uc>/`: `router.ts`, `service.ts`, `repository.ts`, `schemas.ts`). Each use
-case owns its own migrations (`NNNN_<uc>_<desc>.sql`), and modules don't import each other. Migrations run at task
-start under a Postgres advisory lock, so tasks that start together are safe, and a failed migration is rolled back
-by the ECS deployment circuit breaker. `/health` checks the database for the ALB; `/health/live` does not, so a
-database blip doesn't kill every task. The frontend mirrors the same split (`frontend/src/pages/<uc>/`).
+One service holds five modules (`src/modules/<uc>/`: `router.ts`, `service.ts`, `repository.ts`, `schemas.ts`).
+
+- **Isolation.** Each use case has its own migrations (`NNNN_<uc>_<desc>.sql`), and modules don't import each other.
+- **Migrations** run at task start under a Postgres advisory lock. A failed migration stops the task, and the ECS
+  deployment circuit breaker rolls back.
+- **Health checks.** `/health` runs a DB query and is used by the ALB. `/health/live` skips the DB, so a database
+  blip doesn't kill every task.
+- **Lambdas** live in `lambdas/<function>/`. `ticket-fn` has node:test unit tests and a committed esbuild bundle, so
+  `terraform plan` never runs npm; `queue-manager` has standard-library unittests.
 
 ## 6.2 UC3: virtual waiting room
 
-1. A signed-in fan calls `POST /api/waiting-room/:concertId/join`. The API sends the join to SQS FIFO with
-   `MessageGroupId = concertId`, so joins for one concert are processed in arrival order, and a deduplication ID of
-   `hash(userId#concertId)`, so double-clicks don't create two entries. A fan who is already queued keeps their
-   number.
-2. `queue-manager` consumes the joins (batch 10) and writes each fan to DynamoDB `live-queue` with the next position
-   (`WAITING`).
-3. Every minute during the sale window, EventBridge Scheduler invokes `queue-manager`. It admits the next **500
-   `WAITING` fans per concert** (`ADMITTED`, 15-minute expiry). On every scheduled run it also emits the
-   waiting-room size metric.
-4. The browser polls `GET /status` and gets `pending`, `waiting` (with `peopleAhead`), `admitted` (with
-   `admittedUntil`) or `expired`.
-5. Checkout's `isAdmitted` reads `live-queue`. A fan who isn't admitted gets `403 not_admitted` when trying to hold
-   seats.
+1. **Join.** A signed-in fan calls `POST /api/waiting-room/:concertId/join`. The API sends the join to SQS FIFO
+   (group = concert, dedup = `userId#concertId`) together with the concert's sale window, and answers `202 pending`.
+   A fan already queued keeps their number.
+2. **Number.** `queue-manager` (SQS trigger, batch 10) runs an atomic `ADD lastPosition 1` on the concert's
+   `#COUNTER` row in `live-queue`, which also stores `saleStartsAt` and `saleEndsAt`. It then does a conditional put
+   of the fan's row as `WAITING` with that position.
+3. **Admit.** EventBridge Scheduler invokes `queue-manager` every minute. For each concert with a queue (sparse GSI
+   `counter-index`), the run:
+   - **skips** the concert unless `saleStartsAt ≤ now < saleEndsAt`, so one schedule serves concerts with different
+     sales, and early joiners aren't admitted and timed out before tickets go on sale;
+   - **admits** the next **500** `WAITING` fans by position: `ADMITTED`, `admissionExpiresAt = now + 15 min`;
+   - **moves `admittedUpTo` forward**.
 
-The batch size caps the load that reaches the API and RDS at about 500 new buyers per concert per minute, however
-large the crowd. That cap is the main reason one small task and a micro database can survive an on-sale.
+   Each update is conditional, so overlapping runs never double-admit. A 100-position look-back catches fans whose
+   GSI entry arrived late.
+4. **Status.** The browser polls `GET /status` every 5 s. It gets `pending`, `waiting` (with
+   `peopleAhead = position − 1 − admittedUpTo`), `admitted` (with `admittedUntil`) or `expired`. A fan whose
+   admission ran out can rejoin at the back.
+5. **Enforcement.** Checkout's `isAdmitted` (`checkout/admission.ts`) reads the fan's row with the same mapping as the
+   status endpoint. Only `ADMITTED` with an unexpired window may create a hold; anything else gets `403 not_admitted`.
+   A DynamoDB error fails the request and is never treated as admitted. A hold made in the window keeps its own 10
+   minutes to pay.
+
+Every admit run also emits `WaitingRoomSize` (total `lastPosition − admittedUpTo` across concerts). The batch size
+caps the new buyers that reach the API and RDS at 500 per concert per minute, however large the crowd. That cap is
+what lets one small task and a micro database survive an on-sale.
 
 ## 6.3 UC4: all-or-nothing seat hold
 
-The canonical statement (`src/db/seat-holds.ts`) runs in one transaction with the creation of the `pending` order:
+The hold is one statement (`src/db/seat-holds.ts`), run in the same transaction that creates the `pending` order:
 
 ```sql
-UPDATE seats
-   SET status = 'held', held_by = $3, hold_id = $4,
-       held_at = now(), hold_expires_at = now() + make_interval(mins => 10)
- WHERE concert_id = $1
-   AND id = ANY($2::uuid[])
+UPDATE seats SET status = 'held', held_by = $3, hold_id = $4,
+                 held_at = now(), hold_expires_at = now() + make_interval(mins => 10)
+ WHERE concert_id = $1 AND id = ANY($2::uuid[])
    AND (status = 'available' OR (status = 'held' AND hold_expires_at < now()))
 RETURNING id;
 ```
 
-If fewer rows come back than seats were requested, the transaction rolls back and the API returns `409
-seats_unavailable` with the seats that were taken, so nothing is half-held. Postgres row locks serialise overlapping
-holds; the seat IDs are sorted first, so overlapping holds lock in the same order, which avoids deadlocks. Expired
-holds are reclaimed by the same predicate, so no sweeper is needed for correctness. The rules:
+- **All or nothing.** If fewer rows come back than seats were requested, the transaction rolls back and the API
+  answers `409 seats_unavailable`, listing the taken seats. Nothing is ever half-held.
+- **No deadlocks.** Postgres row locks serialise overlapping holds. Seat IDs are sorted first, so overlapping holds
+  lock rows in the same order.
+- **No sweeper needed.** Expired holds are reclaimed by the same predicate.
+- **Other rules:**
+  - prices are fixed at hold time, with a S$4 booking fee per seat;
+  - one active hold per fan per concert;
+  - the ticket type's `max_per_order`;
+  - the sale window and the concert's status.
+- **Confirm (simulated payment).** Seats move `held → sold` only if the hold is the fan's and hasn't expired, and the
+  order becomes `confirmed` in the same transaction. Then `OrderConfirmed` is published.
+- **Failure paths.** A failed payment (`402`), an expired hold or a cancelled concert releases the seats and closes
+  the order as `cancelled` or `expired`.
 
-- prices are fixed when the hold is taken;
-- at most one active hold per fan per concert (`409 active_hold_exists`);
-- a ticket type's `max_per_order` is enforced;
-- the sale window and concert status are checked (`409 not_on_sale`).
+`test/seat-inventory.test.ts` races two holds for the same seats against real Postgres and asserts that exactly one
+wins.
 
-Confirming (simulated payment) moves the seats `held → sold` only if the hold is the fan's and hasn't expired, and
-marks the order `confirmed` in the same transaction. It then publishes `OrderConfirmed`. Payment failure, timeout or
-a concert cancellation release the seats and close the order as `cancelled` or `expired`. The integration test
-`test/seat-inventory.test.ts` runs two concurrent holds on the same seats against real Postgres and asserts that
-exactly one wins.
-
-Why Postgres and not DynamoDB for holds (instructor feedback c): the hold, the order and the seat status must change
-together. In one database that is a local transaction; split across two stores it would need a saga with
-compensations.
+**Why Postgres, not DynamoDB, for holds (instructor feedback c):** the hold, the order and the seat status must change
+together. In one database that is a local transaction; across two stores it would need a saga with compensations.
 
 ## 6.4 UC4/UC2: e-ticket pipeline
 
-`ticket-fn` (Node 20, outside the VPC) consumes `ticket-queue` and reports partial batch failures, so one bad message
-doesn't retry the whole batch. For each order it:
+`ticket-fn` (Node.js 22, arm64, outside the VPC, 256 MB, 60 s) takes up to 10 SQS records per invocation and reports
+partial batch failures, so only failed records are retried. For each `OrderConfirmed` it:
 
-1. renders the PDF;
-2. writes `tickets/<orderId>.pdf` with `If-None-Match: *`. If the object already exists, a previous attempt has
-   already sent the email, so the retry stops: **at most one email per order**;
-3. looks up the fan's email in Cognito by `sub`;
-4. sends the email with the PDF through SES.
+1. **checks the marker:** stops if `tickets/<orderId>.sent` already exists;
+2. **renders the PDF** (pdf-lib): concert, venue, start time in Singapore time, order ID with a QR code, one line per
+   seat, totals. The PDF is written to `tickets/<orderId>.pdf`;
+3. **finds the fan's email:** Cognito `AdminGetUser` with the fan's `sub`;
+4. **sends** the email with the PDF attached through SES v2;
+5. **writes the `.sent` marker**, then logs `deliveryLatencyMs`, which feeds the `ETicketDeliveryLatency` EMF metric
+   (NFR-7).
 
-After 5 failures a message moves to `ticket-dlq` (14-day retention for inspection and re-drive), which raises an
-alarm. In UC2, `GET /api/me/tickets/:id/download` returns a 300-second pre-signed S3 URL, or `409 ticket_not_ready`
-until the PDF exists. SES runs in the sandbox, so only verified recipients receive mail; production access is a
-go-live step (Section 12).
+**Idempotency.** The marker is written only *after* SES accepts the email, which gives three properties:
 
-<!-- EVIDENCE: confirm ticket-fn details against lambdas/ticket-fn/README.md once merged (runtime, timeout, PDF library). -->
+- **A redelivery does nothing.**
+- **A failure before the send retries the whole record**, so no email is ever lost. Overwriting the PDF is harmless:
+  its content is deterministic.
+- **A duplicate email is possible only in two rare cases:** a crash between the send and the marker write, or two
+  copies of one message processed at the same moment. We accept that.
 
-## 6.5 UC5: organiser management and dashboard
+We rejected a conditional `If-None-Match` write of the PDF as the "done" flag, because it would mark the order done
+before the email was sent.
 
-- **Create and edit.** Organisers (Cognito group `organisers`, checked by the API) create draft concerts, replace
-  ticket types and replace the whole seat layout in one transaction.
-- **Publish.** Publishing needs ticket types and a matching layout.
-- **Layout lock.** Once the sale opens, the layout is locked by the service (`SELECT … FOR UPDATE`, `409
-  layout_locked`) and by database triggers for any other writer.
-- **Cancel.** Cancelling is allowed even after the lock; pending holds then fail with `409 concert_cancelled`.
-- **Live dashboard.** `GET /api/organiser/concerts/:id/dashboard` returns available, held and sold counts and revenue
-  per ticket type (`Cache-Control: no-store`). The page polls it every 5 s.
-- **Reporting.** Migration `0003_uc5_reporting_views.sql` adds views for sales by concert, ticket type and day, and
-  seat-status counts. Any BI tool can read them; QuickSight is the design (Section 12).
+**Failures and download.** After 5 receives a record moves to `ticket-dlq` (alarmed). Re-driving it is safe, because
+orders already sent are skipped. In UC2, `GET /api/me/tickets/:id/download` first calls `HeadObject`:
+
+- **no PDF yet** (just bought, or the event is in the DLQ): `409 ticket_not_ready`, so the fan never lands on an S3
+  error page;
+- **PDF present:** a 300 s pre-signed URL that downloads as an attachment.
+
+**SES sandbox.** SES is in the sandbox (200 emails per 24 h, 1 per second). The sender and every recipient must be
+verified, which is why the Lambda's maximum concurrency is 2. Production access is a go-live step (Section 12).
+
+## 6.5 UC5: organiser management, dashboard and reporting
+
+- **Concerts and layout.**
+  - Organisers (Cognito group `organisers`, checked by the API) create drafts, replace ticket types, and replace the
+    whole seat layout in one transaction.
+  - Publishing needs ticket types and a matching layout.
+  - Once the sale opens the layout locks, enforced both in the service (`SELECT … FOR UPDATE`, `409 layout_locked`)
+    and by database triggers.
+  - A concert can be cancelled even after the lock.
+- **Live dashboard.** `GET …/concerts/:id/dashboard` returns available, held and sold counts and revenue per ticket
+  type (`no-store`). The page polls it every 5 s.
+- **Reporting.** `0003_uc5_reporting_views.sql` adds five read-only views:
+  - `report_confirmed_orders`;
+  - `report_sales_by_concert`;
+  - `report_sales_by_ticket_type`;
+  - `report_sales_by_day` (Singapore calendar day);
+  - `report_seat_status`.
+
+  Conventions:
+  - sales count confirmed orders only;
+  - money is integer cents per currency;
+  - `organiser_id` is on every view for row-level security;
+  - no buyer identities.
+
+  `test/reporting-views.test.ts` checks them row by row against orders placed through the real services. QuickSight
+  on top of the views is design-only (Section 12, `docs/reporting.md`).
 
 ## 6.6 UC1 and UC2
 
-- **UC1.** Discovery is public. It lists published concerts with search, filters and pagination, shows detail with
-  per-type availability, and serves the seat map. The list is sent with `Cache-Control: public, max-age=60` and the
-  detail with `max-age=15`. The seat map is `no-store`, because availability changes every second.
-- **UC2.** Account returns the caller's confirmed orders (newest first), single tickets and the download link. To stop
-  order IDs being probed, another fan's order answers `404`, the same as a missing one.
-- **Auth.** The API verifies the Cognito access token a second time (signature, issuer, expiry, `token_use`, client
-  ID), so a misconfigured route can't bypass authorisation.
+- **UC1 (public).** Lists published concerts with search, filters and pagination; shows detail with availability per
+  ticket type; serves the seat map. Cache headers:
+  - list: `public, max-age=60`;
+  - detail: `max-age=15`;
+  - seat map: `no-store`.
+- **UC2.** Returns the caller's confirmed orders (newest first, at most 100), a single e-ticket, and the download
+  link. Another fan's order answers `404`, so order IDs can't be probed.
+- **Auth.** The API verifies every Cognito access token a second time (signature, issuer, expiry, `token_use`,
+  client ID), so a misconfigured gateway route cannot bypass authorisation.
 
 # 7. Scalability and availability
 
@@ -427,320 +459,341 @@ go-live step (Section 12).
 
 | Mechanism | Setting | Effect |
 |---|---|---|
-| CloudFront | SPA cached at the edge (1 day; hashed assets 1 year); deploys invalidate `/*` | Browsing and the waiting page cost the origin almost nothing |
-| API caching | Discovery list `max-age=60`, detail `max-age=15`; seat map, checkout and dashboard `no-store` | Static data is cacheable; fast-changing data is never cached (Google Doc, system UC4). The CloudFront `/api/*` behaviour currently uses `CachingDisabled`, so these headers only take effect in browsers; caching `GET /api/concerts*` at the edge is listed in Section 12 |
-| Waiting room | 500 admissions per concert per minute; 15-min admission window | Turns a 50,000–100,000-fan spike into a bounded stream of buyers |
-| API Gateway throttling | 100 rps steady, 200 burst | Sheds excess load with `429` before it reaches the task |
-| WAF rate rule | 2,000 requests / 5 min per IP | Blocks single-source floods and bots |
-| ECS autoscaling (target design; on for the burst test) | Target tracking: average CPU 60%, ALB requests per target 500/min; min 2, max 4+ | Adds tasks during the admitted surge, removes them afterwards |
-| DynamoDB, SQS, SNS, Lambda | Managed, scale per request | The spike-facing parts have no capacity to plan |
-| RDS | `db.t4g.micro`; `DB_POOL_MAX` 10 per task, so tasks × 10 stays below `max_connections` | Vertical scaling (larger class) is the next step; read replicas for reporting |
+| CloudFront | SPA cached at the edge (1 day; hashed assets 1 year); each deploy invalidates `/*` | Browsing and the waiting page cost the origin almost nothing |
+| API cache headers | List `max-age=60`, detail `max-age=15`; seat map, checkout and dashboard `no-store` | Caches static data; fast-changing data never cached (Google Doc, system UC4). Browser-only today: the CloudFront `/api/*` behaviour uses `CachingDisabled` (Section 12) |
+| Waiting room | 500 admissions per concert per minute; 15-minute admission | Turns a 50,000–100,000-fan spike into a bounded stream of buyers |
+| API Gateway throttle | 100 rps steady, 200 burst | Sheds excess with `429` before it reaches the task |
+| WAF rate rule | 2,000 requests / 5 min per IP | Stops single-source floods and simple bots |
+| ECS autoscaling | Target tracking: CPU 60%, 500 ALB requests per task per minute. Target design min 2, max 4+; max 3 for the burst test | Adds tasks during the admitted surge and removes them afterwards |
+| DynamoDB, SQS, SNS, Lambda | On-demand, per request | Nothing to provision on the parts that face the spike |
+| RDS | `db.t4g.micro`; `DB_POOL_MAX` 10 per task; ≈ 80 `max_connections` | 4 tasks use at most 40 connections. Next steps: a larger class, then read replicas for reporting |
 
 ## 7.2 Availability: target vs implementation
 
 | Failure | Target HA design | Implementation mode | Evidence |
 |---|---|---|---|
-| F1: one task fails | ALB health check removes it; other AZ's tasks serve; ECS replaces it | ECS replaces the only task; outage until it is healthy | <!-- EVIDENCE: F1 drill, stop the ECS task and time until /health is 200 again --> |
-| F2: AZ a lost | Tasks in AZ b serve; RDS fails over to the standby (typically 60–120 s, no committed data lost) | Full outage until the AZ recovers or a restore in AZ b | Design-only |
-| F3: bad deployment | Circuit breaker rolls back to the last good task definition | Same | ECS deployment events |
-| F4: data corruption | Point-in-time restore to a new instance (7-day window) | Same, 1-day window | <!-- EVIDENCE: F4 drill, RDS point-in-time restore duration and restore point --> |
-| F5: `ticket-fn` failing | Retries, then DLQ + alarm; orders are already confirmed in RDS, so a ticket can be re-driven later | Same | <!-- EVIDENCE: DLQ alarm email screenshot (forced alarm) --> |
-| F6: region lost | Restore from snapshot in another region (design: cross-region snapshot copy); RTO ≤ 4 h, RPO ≤ 24 h | Not covered | Design-only |
+| F1: task lost | ALB drops it; tasks in the other AZ keep serving; ECS replaces it | ECS replaces the only task; outage until it passes the health check | Drill F1 (Section 10) |
+| F2: AZ a lost | Tasks in AZ b serve; RDS fails over (typically 60–120 s, no committed data lost) | Full outage until the AZ recovers or we restore in AZ b | Design only |
+| F3: bad deploy | Circuit breaker rolls back to the last good task definition | Same | ECS events |
+| F4: data corruption | Point-in-time restore to a new instance (7-day window) | Same, 1-day window | Drill F4 (Section 10) |
+| F5: `ticket-fn` failing | Retries, then DLQ + alarm. The order is already confirmed in RDS; a re-drive skips orders already sent | Same | DLQ alarm |
+| F6: region lost | Cross-region snapshot copy and Terraform re-apply (RPO ≤ 24 h, RTO ≤ 4 h) | Not covered | Design only |
 
-NFR-5 (99.9% and surviving an AZ loss) is therefore a target-design claim. In implementation mode the instructor
-accepted a single AZ, and AZ a is a single point of failure for the API and the database. The ALB, API Gateway,
-CloudFront, S3, DynamoDB, SQS, SNS and Lambda are regional or global managed services and are multi-AZ in both
-modes.
+NFR-5 (99.9%, survive an AZ loss) is therefore a target-design claim. In implementation mode, accepted by the
+instructor, AZ a is a single point of failure for the API and the database. CloudFront, API Gateway, the ALB, S3,
+DynamoDB, SQS, SNS and Lambda are regional or global managed services and stay multi-AZ in both modes.
 
 # 8. Monitoring and alerts
 
-All monitoring is in Terraform (`infra/modules/monitoring`). Alarms and AWS Budgets notify the SNS topic `alerts`,
-which emails the team (`tayelroy@gmail.com`). Every row of the proposal's monitoring table that applies to the
-built stack has an alarm. Two proposal rows were adapted: the ASG and ElastiCache rows became ECS and RDS rows,
-because we run Fargate and no Redis.
+Monitoring is a Terraform module, `infra/modules/monitoring`. It contains:
 
-| Signal | Metric | Alarm when | Proposal row / NFR |
-|---|---|---|---|
-| API latency | ALB `TargetResponseTime` p95 | > 300 ms <!-- MONITORING: evaluation periods from modules/monitoring README --> | API latency / NFR-1 |
-| API errors | ALB `HTTPCode_Target_5XX_Count` vs `RequestCount` | 5xx > 1% <!-- MONITORING: period from modules/monitoring README --> | API errors |
-| Gateway errors | API Gateway `5xx` | <!-- MONITORING: threshold from modules/monitoring README --> | API errors |
-| Task health | ALB `UnHealthyHostCount` | Any unhealthy host <!-- MONITORING: duration from modules/monitoring README --> | Instance health / NFR-5 |
-| Compute load | ECS `CPUUtilization`, `MemoryUtilization` | <!-- MONITORING: thresholds from modules/monitoring README --> | Scaling headroom |
-| Database load | RDS `CPUUtilization`, `DatabaseConnections`, `FreeStorageSpace` | CPU > 75%; <!-- MONITORING: connection and storage thresholds from modules/monitoring README --> | Database load |
-| Waiting room | `TicketMastery/WaitingRoomSize` (from `queue-manager`, Embedded Metric Format) | <!-- MONITORING: threshold from modules/monitoring README (proposal: 20,000) --> | Waiting room size / NFR-6 |
-| E-ticket backlog | SQS `ApproximateAgeOfOldestMessage` on `ticket-queue` | > 60 s | E-ticket backlog / NFR-7 |
-| E-ticket failures | `ticket-dlq` visible messages | > 0 | E-ticket backlog / NFR-7 |
-| Lambda errors | `Errors` for `queue-manager` and `ticket-fn` | <!-- MONITORING: threshold from modules/monitoring README --> | Application health |
-| Budget | AWS Budgets, monthly cost | Spend crosses USD 20, 40, 60, 80 | Budget / NFR-11 |
+- **19 alarms** in implementation mode, 20 with autoscaling;
+- **one dashboard;**
+- **the SNS topic `alerts`** with an email subscription to `tayelroy@gmail.com`;
+- **an AWS Budgets budget.**
 
-The proposal's "checkout failures %" row is not built, because payment is simulated. Section 12 has the design.
+The messaging module's `ticket-dlq-not-empty` alarm also uses the topic. Every alarm sends both its ALARM and OK
+transitions. In the table, *N × 1 min* means N consecutive one-minute datapoints must all breach.
 
-**Why an Embedded Metric Format (EMF) log line for the waiting-room metric:** `queue-manager` runs in the VPC without
-NAT, so it cannot call `PutMetricData`. It prints one JSON line per run in Embedded Metric Format, and CloudWatch Logs
-turns it into a metric at no API cost.
+| Signal | Metric | Alarm when | Period | Proposal row / NFR |
+|---|---|---|---|---|
+| API latency | ALB `TargetResponseTime` p95 | > 300 ms | 3 × 1 min | API latency / NFR-1 |
+| API errors | ALB target 5xx ÷ `RequestCount` | > 1% | 5 min | API errors |
+| Task health | `UnHealthyHostCount` max | > 0 | 2 × 1 min | Instance health / NFR-5 |
+| API down | `HealthyHostCount` min (missing data = breaching) | < 1 | 2 × 1 min | Instance health / NFR-5 |
+| ECS CPU / memory | `CPUUtilization`, `MemoryUtilization` avg | > 80% | 5 × 1 min | Replaces the EC2 rows |
+| Scaling ceiling | ECS `LiveTaskCount` min (only with autoscaling) | ≥ max capacity | 5 × 1 min | Replaces "ASG at max" |
+| DB CPU | RDS `CPUUtilization` | > 75% | 5 × 1 min | Database load |
+| DB connections | RDS `DatabaseConnections` max | > 64 (80% of ≈ 80) | 5 × 1 min | Database load |
+| DB storage | RDS `FreeStorageSpace` min | < 2 GiB (10%) | 5 min | Database load |
+| Gateway errors | API Gateway `5xx` ÷ `Count` | > 1% | 5 min | API errors (also catches VPC link failures) |
+| Gateway latency | API Gateway `Latency` p95 | > 500 ms | 3 × 1 min | API latency (ALB budget + authorizer + VPC link) |
+| E-ticket backlog | `ticket-queue` `ApproximateAgeOfOldestMessage` | > 60 s | 1 min | E-ticket backlog / NFR-7 |
+| E-ticket failures | `ticket-dlq` visible messages (messaging module) | > 0 | — | E-ticket backlog / NFR-7 |
+| Waiting-room DLQ | `join-queue-dlq.fifo` visible messages | > 0 | 5 min | Fans who never got a position |
+| Lambda errors / throttles | `Errors`, `Throttles` sum, per function (`queue-manager`, `ticket-fn`) | > 0 | 5 min | Application health |
+| Waiting-room size | `TicketMastery/WaitingRoomSize` max (EMF) | > 20,000 | 1 min | Waiting room size / NFR-6 |
+| Checkout failures | `CheckoutPaymentFailures` ÷ `CheckoutPaymentAttempts` (log metric filters on the confirm route: 200 vs 402) | > 20% with ≥ 5 attempts | 5 min | Checkout failures |
+| Budget | AWS Budgets, monthly, USD 80 | Actual > USD 20, 40, 60, 80; forecast > 80 | daily | Budget / NFR-11 |
 
-**Dashboard.** One CloudWatch dashboard with:
+**Proposal rows adapted.** Every proposal row has an alarm except three. EC2 status checks and the ASG row became
+the ECS and target-health alarms. The ElastiCache row was dropped, because holds are Postgres rows covered by the RDS
+alarms. The waiting-room metric is per minute rather than every 10 s, because one minute is the Scheduler's shortest
+interval.
 
-- the four golden signals for the API (latency, traffic, errors, saturation);
-- RDS CPU and connections;
+Two metrics are produced inside our own code:
+
+- **Waiting-room size.** `queue-manager` has no NAT, so it cannot call `PutMetricData`. It prints one EMF JSON line
+  per run, and CloudWatch Logs turns it into a metric.
+- **Checkout failures.** Counted from the API's request log by two metric filters, with no extra code.
+
+**Dashboard** `ticketmastery-dev`: an alarm-status panel plus 16 graphs, each with its threshold line:
+
+- ALB latency and 5xx rate;
+- target health;
+- ECS CPU, memory, and live tasks against the maximum;
+- RDS CPU and credits, connections, free storage;
+- API Gateway requests, 5xx rate and latency (with integration latency alongside);
+- `ticket-queue` age and depth, and e-ticket delivery latency;
+- both DLQs;
+- Lambda errors, throttles and invocations;
 - waiting-room size;
-- `ticket-queue` age and DLQ depth;
-- Lambda errors.
+- checkout failures.
 
-<!-- MONITORING: dashboard name and widget list from modules/monitoring README -->
-<!-- EVIDENCE: dashboard screenshot during the burst test -->
-
-**Alert test.** To prove delivery end to end, one alarm is forced into `ALARM` with `aws cloudwatch set-alarm-state`
-and the email is checked.
-<!-- EVIDENCE: which alarm was forced, time sent vs time received, screenshot of the email -->
+**Alert test.** To prove delivery end to end, `ticketmastery-dev-join-dlq-not-empty` is forced into `ALARM` with
+`aws cloudwatch set-alarm-state` and the email is checked. The SNS subscription has to be confirmed once after apply.
+<!-- EVIDENCE: forced-alarm time vs email received time; screenshot file of the email; dashboard screenshot during the NFR-2 burst -->
 
 # 9. Management approach
 
 ## 9.1 Infrastructure as code and remote state
 
-- **Modules.** All infrastructure is Terraform (≥ 1.10, AWS provider ~> 5.0). One root module (`infra/envs/dev`)
-  wires one module per area:
+All infrastructure is Terraform (≥ 1.10, AWS provider ~> 5.0). One root module (`infra/envs/dev`) wires one module
+per area, each owned by one person:
 
-  | Module | Owner |
-  |---|---|
-  | `network`, `security`, `ecr`, `rds`, `ecs-service` | Elroy |
-  | `edge` | Cody |
-  | `auth-apigw` | Andrew |
-  | `waiting-room` | Yan Ting |
-  | `messaging` | Shi Hui |
-  | `github-deploy`, `monitoring` | Elroy |
+| Module | Owner |
+|---|---|
+| `network`, `security`, `ecr`, `rds`, `ecs-service`, `github-deploy`, `monitoring` | Elroy |
+| `edge` | Cody |
+| `auth-apigw` | Andrew |
+| `waiting-room` | Yan Ting |
+| `messaging` | Shi Hui |
 
-- **Module conventions.**
-  - Shared values are passed in as variables, not looked up.
-  - Resource names are prefixed with `ticketmastery-dev`.
-  - Each module grants the API its own least-privilege policy.
-  - Non-secret configuration reaches the API through `extra_environment`.
-  - Secrets come from Secrets Manager at runtime.
-- **Remote state.** State is in S3 (`ticketmastery-tfstate-000246635159`, versioned) with S3-native locking, so only
-  one apply runs at a time and everyone sees the same state.
-- **Switching modes.** One `tfvars` block switches between implementation and HA mode (Section 3.3). `check` blocks
-  and preconditions catch invalid combinations, for example private-subnet tasks without egress, or Multi-AZ with an
-  AZ pin.
-- **Change process.** Every change is `plan -out` → review → `apply` of that plan, announced to the team first.
+Conventions every module follows:
 
-## 9.2 CI/CD
+- shared values come in as variables, never data-source lookups;
+- names are prefixed `ticketmastery-dev`;
+- the module that owns a resource grants the API least-privilege access to it;
+- non-secret API configuration goes in `extra_environment`;
+- secrets are read from Secrets Manager at runtime.
 
-- **Frontend CI** (`.github/workflows/frontend.yml`) type-checks and builds on pull requests.
-- **Deploy Frontend to AWS** (`deploy-frontend.yml`, manual, `main` only) builds the SPA, syncs it to S3 and
-  invalidates CloudFront. It assumes an IAM role through GitHub OIDC, so no AWS keys are stored in GitHub.
-- **The API image** is built for `linux/amd64`, tagged with the git SHA, pushed to ECR (scanned on push) and rolled
-  out by Terraform or `update-service --force-new-deployment`. The deployment circuit breaker rolls back failures.
-- **The API test suite** runs against a real Postgres: seat-hold concurrency, layout-lock triggers, auth and config.
-  Coverage must be 100% for `src/auth`, `src/config.ts` and `src/modules/account`.
+**State and safety.** State lives in S3 (`ticketmastery-tfstate-000246635159`, versioned) with S3-native locking, so
+only one apply runs at a time. One `tfvars` block switches between the implementation and HA modes. `check` blocks
+and preconditions reject invalid combinations, for example private-subnet tasks without egress, or a VPC link to a
+public ALB. Every change is `plan -out` → review → `apply` of that plan, announced to the team first.
+
+## 9.2 CI/CD and operations
+
+- **Frontend CI** (`frontend.yml`) type-checks and builds on pull requests.
+- **Frontend deploy** (`deploy-frontend.yml`) is manual and runs only from `main`. It builds the SPA, syncs it to S3
+  and invalidates CloudFront. It authenticates through GitHub OIDC, so no AWS keys are stored in GitHub.
+- **API image:** built for `linux/amd64`, tagged with the git SHA, pushed to ECR (scanned on push), and rolled out by
+  Terraform. The deployment circuit breaker rolls back failures.
+- **Tests:** the API suite runs against real Postgres (seat-hold race, layout triggers, reporting views, auth,
+  admission). Coverage must be 100% for `src/auth`, `src/config.ts` and `src/modules/account`. The Lambdas have their
+  own unit tests.
+- **ECS Exec** (IAM-gated) runs one-off checks inside the VPC, such as the oversell SQL, without a bastion.
 
 ## 9.3 Branching, ownership and review
 
-- **Branching.** Trunk-based on `main` with short-lived feature branches and Conventional Commit titles (`CONTRIBUTING.md`).
-- **Ownership.** `.github/CODEOWNERS` maps every path to its owner (per module, per migration use-case tag, per Lambda).
-  Every PR needs an approving review from the code owner of each path it touches.
-- **PR template.** Asks for:
-  - type and touched areas;
-  - how the change was tested;
-  - a checklist: rebased, no secrets or `tfvars`/`tfstate`, no edits to merged migrations, `terraform fmt`/`validate`
-    pass, team told before any apply, docs updated.
-- **Merging.** Feature PRs are squash-merged. The final integration branch is merged with a merge commit so every
+- **Branches.** Trunk-based on `main` with short-lived feature branches and Conventional Commit titles.
+- **Ownership.** `.github/CODEOWNERS` maps each module, migration use-case tag and Lambda to its owner. Every PR needs
+  approval from the owner of each path it touches.
+- **PR template.** Covers type, touched areas and how the change was tested, plus a checklist: rebased; no secrets,
+  `tfvars` or state committed; no edits to merged migrations; `terraform fmt`/`validate` pass; team told before any
+  apply; docs updated.
+- **Merging.** Feature PRs are squash-merged. The final integration branch is merged with a merge commit so each
   teammate keeps authorship.
 
 ## 9.4 Cost management
 
-- **Implementation mode by default:** no NAT gateway, single AZ, one task. That brings the base stack from ≈ USD
-  110–115 (with one NAT gateway) to ≈ 69/month (`docs/cost-estimate.md`).
-- **Teardown:** `terraform destroy` after demos and work sessions. Re-creating the stack takes about 15 minutes.
-  Dev defaults make the destroy clean: no final snapshot, no deletion protection, ECR force-delete.
-- **Budget:** AWS Budgets alerts at USD 20/40/60/80 against the USD 80 project budget (NFR-11).
-- **Schedules:** EventBridge schedules are limited to the sale window (instructor feedback d).
-- **Pay-per-request where usage is idle most of the time:** waiting room, e-tickets, API Gateway.
+- **Implementation mode by default.** No NAT, one AZ, one task and an internal ALB take the base stack from
+  ≈ USD 110–115 (with one NAT and a public ALB) to ≈ 62/month.
+- **Teardown.** `terraform destroy` after demos and work sessions; recreating the stack takes about 15 minutes.
+- **Budgets.** Alerts on actual spend at USD 20/40/60/80, and on a forecast above USD 80 (NFR-11).
+- **Schedule.** The admit schedule costs ≈ USD 0 always on (free tiers). It can still be paused, or limited to start
+  and end dates (instructor feedback d).
+- **Pay per request** for everything idle between on-sales: waiting room, e-tickets and API Gateway.
 
-<!-- EVIDENCE: actual spend to date from Billing / Cost Explorer, and the Budgets screenshot -->
+<!-- EVIDENCE: actual spend to date (Billing / Cost Explorer) and the Budgets screenshot file -->
 
 ## 9.5 Security
 
 | Layer | Control |
 |---|---|
-| Edge | HTTPS only (CloudFront redirect); WAF managed common rules + IP rate limit; S3 reachable only via OAC |
-| Identity | Cognito with email verification; organisers as a group; JWT checked by API Gateway and again by the API |
-| Network | Internal ALB reached only through the VPC link; SG chain VPC link → ALB → task → RDS; RDS private, not publicly accessible |
-| Data | RDS storage encrypted; TLS to the DB; e-ticket bucket private, accessed through 300 s pre-signed URLs; S3 bucket public access blocked |
-| Secrets | DB password generated and stored by RDS in Secrets Manager; injected as ECS secrets; nothing in code, `tfvars` or state |
-| CI | GitHub OIDC role scoped to the frontend bucket and distribution |
-| App | zod validation of all input; error bodies never expose internals; dev-header auth refused in production unless explicitly allowed |
+| Edge | HTTPS only (CloudFront redirect); WAF common rules + IP rate limit; S3 reachable only through OAC |
+| Identity | Cognito with email verification; organisers as a group; JWT checked by API Gateway and again in the API |
+| Network | Internal ALB reachable only from the VPC link SG; SG chain → task → RDS; RDS private, not publicly accessible |
+| Data | RDS storage encrypted; TLS to the DB; e-ticket bucket private (public access blocked, SSE-S3, HTTPS-only bucket policy), read through 300 s pre-signed URLs |
+| Secrets | DB password generated by RDS in Secrets Manager and injected as an ECS secret; never in code, `tfvars` or state |
+| Ops | GitHub OIDC role limited to `main`, the frontend bucket and the distribution; ECS Exec gated by IAM |
+| App | zod validation of all input; errors never expose internals; dev-header auth refused in production |
 
-Gaps we accept for dev (production steps in Section 12):
+**Gaps accepted for dev** (production steps in Section 12):
 
-- Cognito MFA is off (target: optional TOTP).
-- Deletion protection is off so `terraform destroy` works.
-- SES is in the sandbox.
+- **API Gateway → ALB → task is plain HTTP on port 80.** The hop never leaves the VPC and only the VPC link can reach
+  the ALB, but it is not encrypted. HTTPS on the ALB needs a certificate and a custom domain.
+- **Cognito MFA is off.**
+- **Deletion protection is off,** so `terraform destroy` works.
+- **SES is in the sandbox.**
 
 ## 9.6 Backup, disaster recovery, RPO and RTO
 
-| Scenario | Mechanism | RPO target (NFR-8) | RTO target (NFR-9) | Implementation status |
+| Scenario | Mechanism | RPO (NFR-8) | RTO (NFR-9) | Status |
 |---|---|---|---|---|
-| Task loss | ECS replaces the task; ALB health check | n/a | ≤ 5 min | Drill F1 <!-- EVIDENCE: measured F1 recovery time --> |
-| AZ loss | Multi-AZ RDS synchronous standby; tasks in AZ b | 0 | ≤ 5 min | Design-only |
-| Data corruption | RDS automated backups + point-in-time restore to a new instance | ≤ 30 min (PITR restores to within about 5 minutes) | ≤ 1 h | Drill F4 <!-- EVIDENCE: measured F4 restore time and achieved restore point --> |
-| Region loss | Cross-region snapshot copy + Terraform re-apply in another region | ≤ 24 h | ≤ 4 h | Design-only |
-| Lost e-ticket | Order in RDS is the source of truth; DLQ re-drive regenerates it | 0 | Minutes | DLQ alarm |
+| Task loss | ECS replaces the task; ALB health check | n/a | ≤ 5 min | Drill F1 |
+| AZ loss | Multi-AZ RDS synchronous standby; tasks in AZ b | 0 | ≤ 5 min | Design only |
+| Data corruption | Automated backups + point-in-time restore to a new instance | ≤ 30 min | ≤ 1 h | Drill F4 |
+| Region loss | Cross-region snapshot copy + Terraform apply in another region | ≤ 24 h | ≤ 4 h | Design only |
+| Lost e-ticket | The order in RDS is the source of truth; a DLQ re-drive regenerates the e-ticket | 0 | minutes | DLQ alarm |
 
-Terraform state is versioned in S3, and every resource can be recreated from code, so infrastructure itself has no
-backup beyond the repository and the state bucket.
+Infrastructure needs no backup beyond the repository and the versioned state bucket, because every resource is
+rebuilt from code.
 
 ## 9.7 Teardown
 
-`terraform destroy` removes the stack (`docs/deploy.md`, *Teardown*). Afterwards we check for things that keep
-billing: leftover ENIs from in-VPC Lambdas, unattached Elastic IPs, log groups created outside Terraform, manual
-snapshots, and secrets in their recovery window. The state bucket and the Budgets alerts are kept.
+`terraform destroy` removes the stack (`docs/deploy.md`). Dev defaults keep it clean: no final snapshot, no deletion
+protection, ECR and the e-ticket bucket force-deleted. Afterwards we check for anything that keeps billing:
+
+- leftover ENIs from the in-VPC Lambda;
+- unattached Elastic IPs;
+- log groups created outside Terraform;
+- manual snapshots.
+
+The state bucket and the budget are kept.
 
 # 10. Evidence
 
-The evidence files are in `docs/report/evidence/`. The k6 scripts are in `loadtest/`. For the load tests the WAF
-rate rule allowed the test IP, and autoscaling (max 3) was on only for the burst test.
+**Method.** The tests are repeatable scripts in `loadtest/`:
 
-| NFR | Test | Result | Pass? |
+- **Load:** k6 drives the API.
+- **AWS-side numbers:** shell scripts collect them read-only from CloudWatch, ECS and RDS. Two drills change things:
+  F1 stops the task, and F4 restores RDS to a new instance and then deletes it.
+- **Results:** each run writes `loadtest/results/<test>-<UTC timestamp>.json` and `.md`. Screenshots are in
+  `docs/report/evidence/`.
+
+Test conditions:
+
+- **Target.** Every test calls the **API Gateway URL directly**, bypassing CloudFront and the WAF. The WAF's 2,000
+  requests per 5 minutes per IP (≈ 6.7 req/s) would block a single-machine test within minutes; that would only show
+  the WAF working.
+- **Throttle.** The API Gateway stage throttle (100 req/s, burst 200) still applies. The 10× burst (100 req/s) sits
+  exactly on that limit, so `429` responses are counted separately from real failures.
+- **Users.** 125 Cognito test users, signed in with real access tokens. Their addresses are on the SES mailbox
+  simulator, which the sandbox accepts.
+- **Latency.** k6 measures from the tester's machine, so its latency includes the network path to Singapore. The
+  ALB's `TargetResponseTime` gives the server-side share.
+
+| NFR | Method (`loadtest/README.md`) | Result | Pass? |
 |---|---|---|---|
-| NFR-1 | k6 browse (`GET /api/concerts`, detail, seat map) at baseline | p95 <!-- EVIDENCE: k6 p95 ms --> ms, p99 <!-- EVIDENCE: k6 p99 ms --> ms; ALB `TargetResponseTime` p95 <!-- EVIDENCE: CloudWatch p95 --> | <!-- EVIDENCE: pass/fail --> |
-| NFR-2 | k6 10× burst, autoscaling on (max 3) | Peak rps <!-- EVIDENCE: peak rps -->, tasks 1 → <!-- EVIDENCE: max tasks --> in <!-- EVIDENCE: scale-out time from ECS events --> min, dropped requests at the admitted rate <!-- EVIDENCE: count of non-429 errors --> | <!-- EVIDENCE: pass/fail --> |
-| NFR-3 | Many fans racing for the same seats + SQL check for any seat in two confirmed orders | Hold attempts <!-- EVIDENCE: number -->, successful holds <!-- EVIDENCE: number -->, oversold seats <!-- EVIDENCE: SQL result (expect 0) --> | <!-- EVIDENCE: pass/fail --> |
-| NFR-4 | Hold, wait 10 min, re-hold the seats | Seat available again after <!-- EVIDENCE: seconds after expiry --> s | <!-- EVIDENCE: pass/fail --> |
-| NFR-5 | F1: stop the only ECS task | API back after <!-- EVIDENCE: seconds until /health 200 --> s; AZ loss design-only | <!-- EVIDENCE: pass/fail for instance loss --> |
-| NFR-6 | Join N fans in order, compare admission order | <!-- EVIDENCE: N and number of order mismatches (expect 0) --> | <!-- EVIDENCE: pass/fail --> |
-| NFR-7 | Purchases → e-ticket email | Max `ApproximateAgeOfOldestMessage` <!-- EVIDENCE: seconds -->; p95 payment-to-send <!-- EVIDENCE: seconds from ticket-fn logs --> | <!-- EVIDENCE: pass/fail --> |
-| NFR-8/9 | F4: RDS point-in-time restore | Restore point <!-- EVIDENCE: restore point vs latest restorable time -->, restore duration <!-- EVIDENCE: minutes --> | <!-- EVIDENCE: pass/fail --> |
-| NFR-10 | Configuration review | HTTPS redirect, RDS `StorageEncrypted`, `PubliclyAccessible = false`, internal ALB | <!-- EVIDENCE: describe-db-instances / describe-load-balancers output --> |
-| NFR-11 | Spend vs USD 80 | <!-- EVIDENCE: total spend to date (USD) --> | <!-- EVIDENCE: pass/fail --> |
+| NFR-1 | `nfr1-browse.js`: constant 10 req/s for 5 min; mix 30% list, 40% detail, 30% seat map. ALB p95/p99 per minute for the same window (`alb-metrics.sh`) | k6 p95 <!-- EVIDENCE: ms --> / p99 <!-- EVIDENCE: ms -->; ALB p95 <!-- EVIDENCE: ms --> | <!-- EVIDENCE --> |
+| NFR-2 | `nfr2-burst.sh`, autoscaling on (max 3): 10 req/s for 2 min → ramp to 100 req/s over 1 min → hold 10 min → cool 3 min. Records the task count every 15 s, scaling activities and ALB metrics | Peak <!-- EVIDENCE: req/s -->; tasks 1 → <!-- EVIDENCE: max --> after <!-- EVIDENCE: min from ramp start -->; 429s <!-- EVIDENCE: count -->; dropped (non-429) <!-- EVIDENCE: count --> | <!-- EVIDENCE --> |
+| NFR-3 | `nfr3-oversell.js`: 100 admitted fans start at once and race for a pool of 20 seats, 2 per hold, retrying the seats still free; 10% of payments fail on purpose, so seats churn. Then `nfr3-oversell-check.sh` runs SQL inside the VPC (ECS Exec) for any seat in two confirmed orders, for this concert and for all concerts | Lost races (409) <!-- EVIDENCE: count -->; seats in two confirmed orders <!-- EVIDENCE: expect 0 --> | <!-- EVIDENCE --> |
+| NFR-4 | `nfr4-hold-expiry.js`: fan A holds a seat and walks away; from 20 s before expiry the seat map is polled every 2 s until the seat is available; fan B re-holds it; fan A's late payment must get `409 hold_expired` | Still `held` 20 s before expiry; available **0.6 s** after expiry (poll interval 2 s); fan B `201` at +0.6 s; fan A `409 hold_expired` (31 Oct, 16:29–16:40 UTC; `evidence/nfr4-hold-expiry.md`) | Pass (≤ 30 s) |
+| NFR-5 | `nfr5-f1-task-loss.sh` (F1): `aws ecs stop-task` on the only task; `/health` polled through API Gateway until it is stable at 200 again; ECS events recorded | Outage <!-- EVIDENCE: s -->; AZ loss design only | <!-- EVIDENCE --> |
+| NFR-6 | `nfr6-waiting-room.js`: a fresh concert whose sale opens in 120 s; 20 fans join 200 ms apart; their status is polled until admitted. Admit batch lowered to 5 for this run, so admission spans several runs. Checks: queue position = join order, and no fan admitted by a later run than someone who joined earlier | 20 fans, positions 1–20 in join order, **4 admit runs** of 5 one minute apart (first run 41 s after the sale opened); position inversions **0**; admission inversions **0** (31 Oct, 16:29–16:35 UTC; `evidence/nfr6-waiting-room.md`) | Pass |
+| NFR-7 | `nfr7-eticket.sh` over the NFR-3 window: Logs Insights over `ticket-fn` (`deliveryLatencyMs` = SES accepted minus order confirmed), SQS oldest-message age, DLQ depth, SES sends | Emails <!-- EVIDENCE: n -->; p95 <!-- EVIDENCE: s -->; within 60 s <!-- EVIDENCE: % -->; max SQS age <!-- EVIDENCE: s --> | <!-- EVIDENCE --> |
+| NFR-8/9 | `nfr8-f4-pitr.sh` (F4): reads `LatestRestorableTime`, restores to a new instance (same subnet group and SG, private), times until `available`, runs the oversell SQL on the copy, then deletes it | Restore point <!-- EVIDENCE: s before now -->; restore time <!-- EVIDENCE: min --> | <!-- EVIDENCE --> |
+| NFR-10 | `nfr10-config.sh` (read-only): RDS encryption and public access, private subnet routes, internal ALB, CloudFront HTTPS redirect, WAF, API Gateway | RDS `PubliclyAccessible = false`, KMS-encrypted, DB subnets without an internet route; ALB `internal`; CloudFront redirects HTTP → HTTPS on every behaviour, S3 origin through OAC; API Gateway HTTPS only; WAF common rules + rate limit; S3 buckets SSE + public access blocked; all SQS queues encrypted (`evidence/nfr10-config.md`). Inside the VPC the VPC link → ALB hop is HTTP (Section 9.5) | Pass |
+| NFR-11 | Billing / Cost Explorer vs USD 80; Budgets alerts | <!-- EVIDENCE: USD to date --> | <!-- EVIDENCE --> |
 
-Functional evidence (screenshots on the CloudFront URL):
+For NFR-6, the admit batch was lowered from 500 to 5 for the run (`-var admit_batch_size=5`, then restored), so the
+20 fans were admitted over four scheduled runs; with 500 they would all be admitted by one run.
+
+**Functional evidence.** Screenshots on the CloudFront URL:
 
 1. UC1 browse;
-2. UC3 waiting room, queued and then admitted;
-3. UC4 hold with countdown, then confirm;
-4. UC2 My Tickets, PDF download, and the e-ticket email;
+2. UC3 queued, then admitted;
+3. UC4 hold with its countdown, then confirm;
+4. UC2 My Tickets, the PDF download, and the e-ticket email;
 5. UC5 create → publish → live dashboard → cancel;
-6. reporting views returning the demo concert's sales.
+6. the reporting views returning the demo concert's sales.
 
-<!-- EVIDENCE: list the screenshot file names per item above -->
-
-Monitoring evidence: the dashboard during the burst test and the forced-alarm email (Section 8).
-<!-- EVIDENCE: file names -->
+<!-- EVIDENCE: screenshot file names per item, and the monitoring screenshots (dashboard, alarm email) -->
 
 # 11. Instructor feedback and our response
 
 | # | Feedback at the proposal review | Our response | Status |
 |---|---|---|---|
-| — | Use public subnets to avoid the NAT gateway, one AZ, no HA for the implementation, but show HA in the diagram | Implementation mode as Terraform defaults; HA design behind variables, shown in Figure 1 with its cost | Done |
-| a | Put API Gateway in front of Fargate so all APIs are managed centrally | HTTP API with Cognito JWT authorizer, throttling, access logs and a VPC link to an internal ALB (option B, chosen over a public ALB with a secret header) | Done |
-| b | Consider per-feature containers so each part scales on its own | We kept one service but split it into one module per use case, with per-UC migrations and no cross-module imports. Splitting later means one ECS service per module behind ALB path rules (e.g. `/api/concerts*`). A monolith scales as one unit; with the waiting room capping the checkout load, that is acceptable at our scale | Design trade-off, Section 12 |
-| c | DynamoDB is the usual store for dynamic session data (queue numbers, 10-minute holds) | The live queue is in DynamoDB. Seat holds stay in Postgres on purpose: one atomic `UPDATE` beside the seats and orders is what guarantees no double-booking (Section 6.3) | Done, justified |
-| d | EventBridge every minute costs money; check it | ≈ 43,800 invocations/month, inside the Scheduler free tier (14 M), and limited to the sale window anyway | Done |
-| e | UC5 needs internal reporting, e.g. QuickSight | The live dashboard plus SQL reporting views in RDS. QuickSight with a VPC connection is designed, not deployed, because of per-user billing (Section 12) | Partly done |
+| — | Use public subnets to avoid NAT, one AZ, no HA in the implementation, but show HA in the diagram | Implementation mode is the Terraform default; the HA design sits behind variables and is shown with its cost (Figure 1, Section 3.3) | Done |
+| a | Put API Gateway in front of Fargate to manage all APIs centrally | HTTP API with a Cognito JWT authorizer, throttling, access logs, and a VPC link to an internal ALB (chosen over a public ALB with a secret header) | Done |
+| b | Consider per-feature containers so each part scales separately | One service, split into one module per use case with per-UC migrations and no cross-module imports. A later split is one ECS service per module behind ALB path rules. With the waiting room capping checkout load, scaling as one unit is acceptable at our scale | Trade-off, Section 12 |
+| c | DynamoDB is the usual store for dynamic session data | The live queue and admissions are in DynamoDB. Seat holds stay in Postgres on purpose: one atomic `UPDATE` beside the seats and orders guarantees no double-booking (Section 6.3) | Done, justified |
+| d | EventBridge every minute costs money; check it | ≈ 43,800 runs/month: inside the Scheduler (14 M) and Lambda (1 M) free tiers, ≈ USD 0. The schedule can be paused or date-limited, and admits only inside each concert's sale window | Done |
+| e | UC5 needs internal reporting, e.g. QuickSight | Live dashboard + five tested SQL reporting views. QuickSight designed (VPC connection, read-only user, SPICE, row-level security), not deployed | Data layer done; BI design only |
 
 # 12. Limitations and future work
 
-- **QuickSight (design only).** Design:
-  - QuickSight (Enterprise) with a VPC connection into the private subnets; its security group is added to
-    `rds_extra_ingress_sg_ids`.
-  - A read-only DB user, with access only to the reporting views.
-  - Dashboards for sales by concert, ticket type and day, sell-through, and seat status.
+- **QuickSight (design only, `docs/reporting.md`).** The design:
+  - Enterprise edition in ap-southeast-1;
+  - a VPC connection whose ENIs sit in the private subnets, with its own SG added to `rds_extra_ingress_sg_ids`;
+  - a read-only `quicksight_reader` login granted only the five views;
+  - each view imported into SPICE, refreshed hourly during sales and daily otherwise, so dashboards never load the
+    checkout database;
+  - one "Concert sales" dashboard with row-level security on `organiser_id`.
 
-  Not deployed because QuickSight is billed per user per month, which doesn't fit a USD 80 budget. The reporting
-  views make it a console-only step later.
-- **HA not deployed.** AZ-loss tolerance, Multi-AZ RDS and autoscaling are design-only except for the burst test.
-  Turning them on is a `tfvars` change (≈ USD 190/month).
-- **Multi-region.** Not justified with 80% of customers in Singapore. The risk is that two regions could each sell
-  the same seat unless writes stay in one region. Next step: cross-region snapshot copy for region-loss DR. The
-  Malaysia (ap-southeast-5), Thailand (ap-southeast-7) and Hong Kong (ap-east-1) regions are future expansion or DR
-  targets.
-- **Edge caching of the concert list.** Add a CloudFront behaviour for `GET /api/concerts*` that honours the API's
+  The smallest setup (1 Author at USD 24 + 2 Readers at USD 3) is **USD 30/month** at list prices checked 31 Oct 2026.
+  That is billed whether or not anyone uses it, and is over a third of the USD 80 budget. Enabling it later needs no
+  application change.
+- **HA not deployed.** AZ-loss tolerance, Multi-AZ RDS and permanent autoscaling are design-only. Turning them on is a
+  `tfvars` change (≈ USD 194/month for the whole stack).
+- **Multi-region.** Not justified with 80% of customers in Singapore. A second write region would also risk selling
+  the same seat twice. Next step: cross-region snapshot copy for region-loss DR; Malaysia (ap-southeast-5), Thailand
+  (ap-southeast-7) and Hong Kong (ap-east-1) are the candidate regions.
+- **Edge caching of the concert list.** A CloudFront behaviour for `GET /api/concerts*` that honours the API's
   `max-age`, so browsing during an on-sale never reaches the origin.
-- **Per-feature services** (feedback b) once traffic justifies separate scaling. Adaptive batch size: shrink the
-  admission batch while latency or error alarms are firing.
-- **Real payments.** Stripe, with an idempotency key per order and a signature-verified webhook. Checkout-failure-rate
-  alarm (the proposal's checkout-failures row).
+- **Admission control.** Per-feature ECS services (feedback b) once traffic justifies them. An adaptive batch size
+  that shrinks admissions while latency or error alarms fire.
+- **Real payments.** Stripe, with an idempotency key per order and a signature-verified webhook. The checkout-failure
+  alarm already exists.
 - **Production readiness:**
-  - SES production access;
+  - SES production access and a verified domain (DKIM);
+  - HTTPS on the ALB with a custom domain and ACM certificate;
   - Cognito MFA;
   - deletion protection and 7-day backups;
-  - custom domain with ACM certificates;
-  - bot and scalper protection (WAF Bot Control, CAPTCHA at join);
-  - push updates (WebSocket) instead of polling;
-  - multi-currency pricing for MY, TH and HK.
-- **API CI/CD.** The API image is built and deployed by hand. Next step: a GitHub Actions workflow that tests, builds,
-  pushes to ECR and updates the service.
+  - bot and scalper protection (WAF Bot Control, CAPTCHA on join);
+  - push updates instead of polling;
+  - multi-currency pricing.
+- **API CI/CD.** The API image is still built and deployed by hand. Next step: a workflow that tests, builds, pushes
+  to ECR and updates the service.
 
 # Appendix A. API list
 
 | Method and path | Auth | Purpose |
 |---|---|---|
 | `GET /health` | public | Readiness (DB `SELECT 1`), used by the ALB |
-| `GET /health/live` | public (not routed by API Gateway) | Liveness, no DB |
-| `GET /api/concerts` | public | List and search published concerts (`q`, `artist`, `venue`, `from`, `to`, `limit`, `offset`) |
-| `GET /api/concerts/:id` | public | Concert detail with ticket types and availability |
-| `GET /api/concerts/:id/seats` | public | Seat map with `available`, `held`, `sold` |
-| `GET /api/me` | fan | Caller's `sub` and groups |
-| `GET /api/me/orders` | fan | Confirmed orders, newest first |
-| `GET /api/me/tickets/:ticketId` | fan | One order |
-| `GET /api/me/tickets/:ticketId/download` | fan | Pre-signed PDF URL (300 s) |
-| `POST /api/waiting-room/:concertId/join` | fan | Join the queue |
-| `GET /api/waiting-room/:concertId/status` | fan | Position and state |
+| `GET /api/concerts`, `/api/concerts/:id`, `/api/concerts/:id/seats` | public | List and search; detail with availability; seat map |
+| `GET /api/me`, `/api/me/orders`, `/api/me/tickets/:id` | fan | Identity; confirmed orders; one e-ticket |
+| `GET /api/me/tickets/:id/download` | fan | Pre-signed PDF URL (300 s); `409 ticket_not_ready` until the PDF exists |
+| `POST /api/waiting-room/:concertId/join`, `GET …/status` | fan | Join the queue; position and state |
 | `GET /api/checkout/concerts/:concertId/seats` | fan | Seat map plus the fan's active hold |
-| `POST /api/checkout/holds` | fan, admitted | Hold 1–20 seats for 10 minutes |
+| `POST /api/checkout/holds` | fan, admitted | Hold 1–20 seats for 10 min; `403 not_admitted`, `409 seats_unavailable` |
 | `DELETE /api/checkout/holds/:holdId` | fan | Release a hold |
-| `POST /api/checkout/holds/:holdId/confirm` | fan | Simulated payment; confirm the order |
-| `POST /api/organiser/concerts` | organiser | Create a draft concert |
-| `GET /api/organiser/concerts` | organiser | List my concerts |
-| `GET /api/organiser/concerts/:id` | organiser | Detail with counts |
-| `PUT /api/organiser/concerts/:id/ticket-types` | organiser | Replace ticket types |
-| `PUT /api/organiser/concerts/:id/layout` | organiser | Replace the seat layout (one transaction) |
-| `POST /api/organiser/concerts/:id/publish` | organiser | `draft` → `scheduled` |
-| `POST /api/organiser/concerts/:id/cancel` | organiser | Cancel with a reason |
-| `GET /api/organiser/concerts/:id/dashboard` | organiser | Live counts and revenue |
+| `POST /api/checkout/holds/:holdId/confirm` | fan | Simulated payment; `402 payment_failed`, `409 hold_expired` |
+| `POST`, `GET /api/organiser/concerts`; `GET …/:id` | organiser | Create a draft; list mine; detail with counts |
+| `PUT …/:id/ticket-types`, `PUT …/:id/layout` | organiser | Replace ticket types; replace the layout (one transaction) |
+| `POST …/:id/publish`, `POST …/:id/cancel` | organiser | `draft` → `scheduled`; cancel with a reason |
+| `GET …/:id/dashboard` | organiser | Live counts and revenue |
 
-Errors are JSON `{ "error": { "code", "message", "details?" } }`: 400 validation, 401 no user, 403 not allowed or not
-admitted, 404 unknown, 409 conflict (seats taken, hold expired, layout locked).
+Errors are JSON `{ "error": { "code", "message", "details?" } }`. Status codes:
+
+- 400: validation;
+- 401: no user;
+- 403: not allowed or not admitted;
+- 404: unknown;
+- 409: conflict.
 
 # Appendix B. Cost tables
 
-Source: `docs/cost-estimate.md`. On-demand list prices, ap-southeast-1, USD, 730 h/month, excluding tax; estimates.
+Source: `docs/cost-estimate.md`. On-demand list prices in USD for ap-southeast-1, 730 h/month, excluding tax.
+Estimates.
 
-**Implementation mode (deployed defaults), if left running 24/7**
+| Item | Implementation (deployed) | ≈ USD | Target HA (2 tasks) | ≈ USD |
+|---|---|---|---|---|
+| NAT gateways + Elastic IPs | none | 0 | 2 + 2 EIPs | 86.5 + 7.3 |
+| ALB (internal) | 1, ~1 LCU | 24.2 | 1 | 24.2 |
+| RDS `db.t4g.micro` | single-AZ | 18.3 | Multi-AZ | 36.6 |
+| RDS storage 20 GB gp3 | single-AZ | 2.8 | Multi-AZ | 5.5 |
+| Fargate 0.25 vCPU / 0.5 GB | 1 task | 11.3 | 2 tasks, private | 22.6 |
+| Public IPv4 | task × 1 | 3.65 | none | 0 |
+| Secrets Manager, Logs, ECR | | ≈ 1.3 | | ≈ 1.5 |
+| **Base stack** | | **≈ 62** (2.0/day) | | **≈ 184** (6.1/day) |
+| WAF (1 ACL, 3 rules) | | ≈ 8 | | ≈ 8 |
+| Monitoring (after free tier) and pay-per-request services | | ≈ 2 | | ≈ 2 |
+| **Whole stack** | | **≈ 72** (2.4/day) | | **≈ 194** (6.4/day) |
 
-| Item | Assumption | ≈ USD/month |
-|---|---|---|
-| Application Load Balancer | 1, ~1 LCU average | 24.2 |
-| RDS PostgreSQL | `db.t4g.micro`, single-AZ | 18.3 |
-| RDS storage | 20 GB gp3 | 2.8 |
-| ECS Fargate | 1 task, 0.25 vCPU / 0.5 GB | 11.3 |
-| Public IPv4 | ALB × 2 + task × 1 | 10.95 |
-| Secrets Manager | 1 secret | 0.4 |
-| CloudWatch Logs | ~1 GB, 14-day retention | 0.7–1.0 |
-| ECR | < 1 GB | 0.1 |
-| NAT gateway | none | 0 |
-| **Total** | | **≈ 69** (≈ 2.3/day) |
+**Not in the estimate:** Route 53 (USD 0.50/month per hosted zone) and QuickSight (USD 30/month minimum); neither is
+deployed. Pay-per-request services (CloudFront, S3, API Gateway, Cognito, Lambda, SQS, SNS, DynamoDB, Scheduler, SES)
+are near zero at dev traffic and mostly inside free tiers; `docs/cost-estimate.md` itemises them.
 
-**Target HA design (not deployed), at the minimum of 2 tasks**
-
-| Item | Assumption | ≈ USD/month |
-|---|---|---|
-| NAT gateways | 2 (one per AZ) | 86.5 |
-| NAT Elastic IPs | 2 | 7.3 |
-| Application Load Balancer | 1 | 24.2 |
-| ALB public IPv4 | 2 | 7.3 |
-| RDS PostgreSQL | `db.t4g.micro`, Multi-AZ | 36.6 |
-| RDS storage | 20 GB gp3, Multi-AZ | 5.5 |
-| ECS Fargate | 2 tasks, private subnets | 22.6 |
-| Secrets Manager + Logs + ECR | | ≈ 1.5 |
-| **Total** | | **≈ 190** (≈ 6.3/day) |
-
-**Outside the base-stack estimate:**
-
-- WAF: ≈ USD 5/month per web ACL + 1 per rule, a fixed cost.
-- Route 53 hosted zone: USD 0.50/month.
-- CloudFront, S3, API Gateway, Cognito, Lambda, SQS, SNS, DynamoDB, EventBridge Scheduler and SES: pay per request,
-  near zero at dev traffic.
-- QuickSight: per user, not deployed.
-
-<!-- EVIDENCE: actual monthly bill / Cost Explorer breakdown to compare with the estimate -->
+<!-- EVIDENCE: actual monthly bill / Cost Explorer breakdown next to this estimate -->
