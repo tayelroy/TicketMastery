@@ -69,7 +69,7 @@ At the proposal feedback (Oct 2026) the instructor told us to skip the NAT gatew
 | | Implementation (deployed by default) | Target HA (diagram + report) |
 |---|---|---|
 | Compute | 1 Fargate task in the AZ a public subnet with a public IP (inbound only from the ALB), no NAT gateway, autoscaling off | Tasks in private subnets across 2 AZs, NAT gateway per AZ (or VPC endpoints), autoscaling on CPU and request count |
-| Database | RDS single-AZ, pinned to AZ a. An AZ a outage means downtime until AWS recovers or we restore elsewhere; RTO is TBC | RDS Multi-AZ, automatic failover |
+| Database | RDS single-AZ, pinned to AZ a. An AZ a outage means downtime until AWS recovers or we restore elsewhere; a timed point-in-time restore took 9 min until the restored DB accepted connections (RPO 3 min) | RDS Multi-AZ, automatic failover |
 | Serverless | SQS/SNS/Lambda/S3/SES are Multi-AZ by default; SQS retries then routes to a DLQ | Same |
 | Cost (estimate, whole stack) | ≈ USD 72/month | ≈ USD 194/month |
 

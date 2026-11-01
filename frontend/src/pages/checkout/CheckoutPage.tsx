@@ -250,7 +250,7 @@ export function CheckoutPage() {
       <section className="card narrow">
         <h1>Checkout</h1>
         <p className="muted">{loadError}</p>
-        <Link to="/concerts" className="btn">
+        <Link to="/" className="btn">
           Back to concerts
         </Link>
       </section>
@@ -281,7 +281,7 @@ export function CheckoutPage() {
             <Link to={`/myaccount/tickets/${confirmed.orderId}`} className="btn">
               My Tickets
             </Link>
-            <Link to="/concerts" className="btn ghost">
+            <Link to="/" className="btn ghost">
               More concerts
             </Link>
           </div>

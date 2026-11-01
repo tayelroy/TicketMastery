@@ -198,7 +198,7 @@ Not deployed: QuickSight (UC5 reporting is design only, see [instructor feedback
   - automated backups with point-in-time restore (`db_backup_retention_period`, default 1 day in dev);
   - restore to a new instance in the healthy AZ.
 
-  **RTO is TBC.** We haven't measured how long a restore takes.
+  **Measured restore (F4 drill, 31 Oct 2026):** a point-in-time restore to a new instance accepted connections 9 min 14 s after the request and reported `available` after 28 min 28 s; the restore point was 168 s before the request. Details: `docs/report/evidence/nfr8-f4-pitr.md`.
 - **Flip**: set `db_multi_az = true` in `terraform.tfvars` and apply. This adds a synchronous standby in the second AZ with automatic failover, typically 60–120 s with no committed-data loss. `envs/dev` drops the AZ pin automatically (RDS rejects `availability_zone` together with `multi_az = true`, and the rds module enforces that with a precondition). Applying converts the instance in place, which can cause a brief performance impact, so do it outside a demo.
 - **Two AZs are still required** even with single-AZ RDS; see [why there are still two public and two private subnets](#implementation-vs-target-ha-design).
 
