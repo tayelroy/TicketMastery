@@ -1,9 +1,7 @@
 # TicketMastery final presentation: slide outline
 
-IS458 final presentation (8%), Tue 10 Nov 2026, 20 minutes. Facts and numbers come from `report.md`; a
-`[[EVIDENCE: …]]` marker means the number is still an `<!-- EVIDENCE -->` placeholder in the report and must be
-filled in from `loadtest/results/` or `docs/report/evidence/` before the slide is final. The live demo follows
-`demo-script.md`.
+IS458 final presentation (8%), Tue 10 Nov 2026, 20 minutes. Facts and numbers come from `report.md` and
+`docs/report/evidence/` (measured 31 Oct–1 Nov 2026). The live demo follows `demo-script.md`.
 
 Presenters follow the proposal deck: one use case each (UC1 Cody & Nai Xin, UC2 Andrew, UC3 Yan Ting, UC4 Shi Hui,
 UC5 Elroy), and Elroy covers the base infrastructure, monitoring and management approach. The slides added for the
@@ -60,7 +58,7 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - Owners: UC1 Discovery Cody & Nai Xin · UC2 My Tickets Andrew · UC3 Waiting room Yan Ting · UC4 Checkout Shi Hui ·
     UC5 Management + base stack Elroy
   - Agenda: changes since the proposal → architecture → use cases → live demo → operations
-- **Figure:** small thumbnail of `figures/implementation-architecture.png` on the title card.
+- **Figure:** small thumbnail of `figures/implementation-architecture.svg` on the title card.
 - **Speaker notes:** Good afternoon, we are Group 4, and this is TicketMastery, a concert ticketing platform on AWS.
   All five use cases from our proposal are now built and running in our dev account in Singapore, and you will see
   them live halfway through. Each of us presents the use case we own. I'm Elroy: I own concert management and the
@@ -133,8 +131,8 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - Deployed: 1 AZ, no NAT, 1 task, single-AZ RDS, ≈ USD 72/month · Target HA: 2 AZs, NAT per AZ, 2–4+ tasks,
     Multi-AZ RDS, ≈ USD 194/month
   - One `tfvars` block switches between the two; `check` blocks reject invalid combinations
-- **Figure:** `figures/implementation-architecture.png` (main), `figures/target-ha-architecture.png` (second build or
-  inset).
+- **Figure:** `figures/implementation-architecture.svg` (main), `figures/target-ha-architecture.svg` (second build or
+  inset). Both are SVG, so they stay sharp when scaled in Canva.
 - **Speaker notes:** This is what is deployed. Fans hit CloudFront with WAF; the React app comes from a private S3
   bucket, and API calls go to API Gateway, which checks the Cognito token and reaches an internal load balancer
   through a VPC link, so the ALB is never on the internet. One Fargate task runs all five modules against PostgreSQL.
@@ -281,8 +279,10 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - Custom metrics without a NAT: `WaitingRoomSize` and `ETicketDeliveryLatency` as EMF log lines; checkout failures
     from log metric filters
   - Dashboard `ticketmastery-dev`: alarm panel + 16 graphs with threshold lines
-  - Alert path tested: forced `join-dlq-not-empty` alarm → email [[EVIDENCE: forced-alarm time vs email time]]
-- **Figure:** screenshots *to take* `demo-16-cloudwatch-dashboard.png` and `demo-17-alarm-email.png`.
+  - Alerts fired for real in the burst test (API Gateway 5xx and latency, ALB 5xx and latency, then at-max-capacity);
+    forced `join-dlq-not-empty` → ALARM and OK emails within the same minute, 0 failed deliveries
+- **Figure:** `evidence/nfr2-bursts-latency-cpu.png` (CloudWatch graph of the bursts); screenshot *to take*
+  `demo-17-alarm-email.png`.
 - **Speaker notes:** Monitoring is its own Terraform module. The proposal's monitoring table became alarms, adapted to
   what we built: EC2 checks became ECS and target-health alarms, and the Redis rows went away. Thresholds come from
   the NFRs, for example ALB p95 above 300 milliseconds, or an e-ticket waiting more than a minute. The queue-manager
@@ -296,17 +296,16 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
 - **On slide:**
   - Layers: CloudFront edge cache → WAF 2,000 req / 5 min per IP → API Gateway 100 rps / 200 burst → waiting room 500
     per concert per minute → ECS autoscaling (CPU 60%, 500 req/task/min)
+  - Measured: one 0.25 vCPU task saturates at ≈ 60 req/s; autoscaling takes 4–5 min, so on-sales need pre-scaling
   - Spike-facing parts are on-demand: SQS, SNS, DynamoDB, Lambda
-  - Database headroom: 10 connections per task, ≈ 80 max → 4 tasks use 40
-  - Deployed: a lost task is replaced by ECS, with an outage until it is healthy; AZ a is a single point of failure
-    (accepted for dev)
+  - Deployed: a lost task is replaced by ECS (76 s outage in drill F1); AZ a is a single point of failure (accepted)
   - Target HA: tasks in 2 AZs + Multi-AZ RDS failover (typically 60–120 s, no committed data lost); design only
-- **Figure:** failure table from report §7.2 (failure / target HA / implementation / evidence).
-- **Speaker notes:** Scalability is layered. CloudFront serves the app and the waiting page from the edge. WAF and the
-  API Gateway throttle shed floods before they reach us. The waiting room is the main control: however big the crowd,
-  only 500 new buyers per concert per minute reach the API and database, and with autoscaling on, ECS adds tasks for
-  that surge. On availability we are honest: the deployed mode has one task in one AZ, so losing it means an outage
-  until ECS replaces it. Surviving an AZ loss is a target-design claim, one variable change away.
+- **Figure:** `evidence/nfr2-bursts-requests.png` (requests, errors and healthy tasks in both burst runs).
+- **Speaker notes:** Scalability is layered: CloudFront serves the app from the edge, WAF and the API Gateway throttle
+  shed floods, and the waiting room lets only 500 new buyers per concert per minute reach the API. The burst test
+  taught us something: one small task saturates at about 60 requests a second and autoscaling needs four to five
+  minutes, so starting from one task we dropped 3% of requests before it caught up. Starting from two tasks, as in
+  the HA design, the same 10-times burst had zero errors. So organisers' sale times should trigger pre-scaling.
 
 ## Slide 16. Evidence: NFR results
 
@@ -314,20 +313,17 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
 - **On slide:**
   - Method: k6 and scripts in `loadtest/`, against the API Gateway URL, 125 Cognito test users; every run saved in
     `loadtest/results/`
-  - NFR-3 oversell: 100 admitted fans race for 20 seats → seats in two confirmed orders [[EVIDENCE: expect 0]]
-  - NFR-4 hold expiry: seat available 0.6 s after expiry (target ≤ 30 s) · NFR-6 fairness: 0 inversions · NFR-10
-    security config: pass
-  - NFR-1 browse p95 [[EVIDENCE: ms]] · NFR-2 burst: tasks 1 → [[EVIDENCE: max]] in [[EVIDENCE: min]] · NFR-5 task
-    loss outage [[EVIDENCE: s]]
-  - NFR-7 e-tickets within 60 s [[EVIDENCE: %]] · NFR-8/9 restore time [[EVIDENCE: min]]
-- **Figure:** results table from report §10; dashboard screenshot during the NFR-2 burst [[EVIDENCE: screenshot
-  file]].
-- **Speaker notes:** Every NFR has a repeatable script. Tests hit API Gateway directly, because the WAF limit of 2,000
-  requests per five minutes per IP would block a single test machine and only prove the WAF works. The key result is
-  correctness: in the oversell test, 100 admitted fans race for 20 seats with some payments failing on purpose, and
-  SQL run inside the VPC counts seats sold twice. [[EVIDENCE: NFR-3 result]]. A seat came back 0.6 seconds after its
-  hold expired, against a 30-second target, and the fairness test had zero inversions. [[EVIDENCE: one sentence on
-  NFR-1/NFR-2 results]].
+  - NFR-3 oversell: 100 admitted fans × 2 runs race for 20 seats → 278 lost races, **0 seats sold twice** (SQL in VPC)
+  - NFR-4 hold expiry: seat available 0.6 s after expiry (≤ 30 s) · NFR-6 fairness: 4 admit runs, 0 inversions
+  - NFR-1 browse p95 30 ms (< 300) · NFR-2 10× burst: 0 errors from 2 tasks, 3.3% failed from 1 task
+  - NFR-5 task loss: 76 s outage (≤ 5 min) · NFR-7 e-tickets: 10/10 within 60 s, p95 9.9 s
+  - NFR-8/9 restore: RPO 2.8 min, RTO 9 min · NFR-10 security config: pass · NFR-11 spend USD 22.92, all credits
+- **Figure:** results table from report §10, condensed to NFR / target / measured / pass.
+- **Speaker notes:** Every NFR has a repeatable script, run against the live stack. The key result is correctness:
+  two hundred admitted fans raced for twenty seats, 278 lost the race cleanly, and SQL run inside the VPC found no
+  seat sold twice. Expired holds come back within a second, and the queue admits strictly in arrival order. We also
+  report what didn't pass first time: from a single task, the 10-times burst dropped 3% of requests, and the first
+  e-ticket run hit an IAM gap that we fixed; those orders were retried from the queue and none were lost.
 
 ## Slide 17. Management approach: code, pipeline, review
 
@@ -354,14 +350,15 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
 - **On slide:**
   - HTTPS at the edge, WAF, S3 only through OAC; database private, encrypted, TLS from the API
   - DB password generated by RDS in Secrets Manager, never in code, `tfvars` or state
-  - Task loss target ≤ 5 min (drill F1: [[EVIDENCE: s]]); data corruption: point-in-time restore, RPO ≤ 30 min,
-    RTO ≤ 1 h (drill F4: [[EVIDENCE: min]])
+  - Task loss target ≤ 5 min (drill F1: 76 s outage); data corruption: point-in-time restore, RPO ≤ 30 min,
+    RTO ≤ 1 h (drill F4: RPO 2.8 min, database back in 9 min 14 s)
   - AZ and region loss: design only · Accepted dev gaps: HTTP inside the VPC, MFA off, SES sandbox
 - **Figure:** condensed tables from report §9.5 and §9.6.
 - **Speaker notes:** Security is layered from the edge in: HTTPS only, WAF rules, a bucket reachable only through
   CloudFront, tokens checked twice, and a private, encrypted database. No password is in our code or state; RDS
-  generates it in Secrets Manager. We have scripted drills for task loss and point-in-time restore: [[EVIDENCE: F1
-  outage in s, F4 restore in min]]. AZ and region loss are design-only.
+  generates it in Secrets Manager. We ran both drills: stopping the only task caused a 76-second outage, and a
+  point-in-time restore had the database back in nine minutes with under three minutes of data loss. AZ and region
+  loss are design-only.
 
 ## Slide 19. Cost and Budgets
 
@@ -371,12 +368,12 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - Largest saving: no NAT gateways (two with Elastic IPs ≈ USD 94/month)
   - AWS Budgets, USD 80/month: alerts at 20, 40, 60, 80 actual and on a forecast above 80
   - `terraform destroy` after work sessions; about 15 minutes to recreate
-  - Spend to date: [[EVIDENCE: USD to date]] of the USD 80 budget (NFR-11)
-- **Figure:** cost table from report Appendix B; Budgets screenshot [[EVIDENCE: Budgets screenshot file]].
+  - Spend to date: USD 22.92 of usage in October (USD 2.02/day measured), all covered by credits (NFR-11)
+- **Figure:** cost table from report Appendix B; Budgets console screenshot *to take* (`ticketmastery-dev-monthly-cost`).
 - **Speaker notes:** Our deployed stack is about 72 dollars a month, against about 194 for the HA design; the
   difference is mostly NAT gateways, Multi-AZ RDS and a second task. To stay under our 80-dollar budget, AWS Budgets
-  emails us at 20, 40, 60 and 80 dollars, and we destroy the stack after work sessions. [[EVIDENCE: actual spend to
-  date]].
+  emails us at 20, 40, 60 and 80 dollars, and we destroy the stack after work sessions. October cost 23 dollars of
+  usage, about two dollars a day, all covered by credits.
 
 ## Slide 20. Limitations and future work
 
@@ -400,7 +397,7 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - No seat sold twice: one all-or-nothing SQL `UPDATE`, tested under a race
   - The waiting room caps the spike at 500 buyers per concert per minute
   - Run as code: Terraform modules, CI/CD, CloudWatch alarms and Budgets
-- **Figure:** small `figures/implementation-architecture.png`.
+- **Figure:** small `figures/implementation-architecture.svg`.
 - **Speaker notes:** To sum up: all five use cases are built, and you saw them work together live. Two choices carry
   the system: one SQL statement that holds seats all-or-nothing, so no seat is sold twice, and a waiting room that
   admits 500 fans per concert per minute, so a small stack survives an on-sale. Thank you; we're happy to take

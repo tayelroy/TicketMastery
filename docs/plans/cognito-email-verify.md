@@ -1,7 +1,11 @@
 # Cognito: verify a new email before it replaces the sign-in name
 
-**Owner:** Elroy · **Module owner / reviewer:** Andrew (`infra/modules/auth-apigw/`) · **Target:** done today, 2026-10-31
-**Branch:** `infra/cognito-email-verify-before-update`
+**Owner:** Elroy · **Module owner / reviewer:** Andrew (`infra/modules/auth-apigw/`) · **Target:** 2026-10-31
+**Status: done.** Folded into `feat/final-integration` (see [final-submission.md](final-submission.md)) and applied to
+dev on 31 Oct 2026. Smoke test on 1 Nov: `name` saved; an email change returned code-delivery details while
+`get-user` still showed the old, verified email; a `phone_number` write was rejected (`NotAuthorizedException:
+A client attempted to write unauthorized attribute`). CODEOWNERS now has real handles, so step 5 below no longer
+needs a manual request.
 
 ## Goal
 

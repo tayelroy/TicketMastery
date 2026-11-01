@@ -15,9 +15,8 @@ fontsize: 10pt
 #show raw: set text(size: 8pt)
 ```
 
-<!-- Export from docs/report/: pandoc report.md -o report.pdf --pdf-engine=typst ; pandoc report.md -o report.docx.
-     Numbers come from the repo docs and the proposal. EVIDENCE comments mark measurements still to paste in from
-     loadtest/results/ and docs/report/evidence/. -->
+<!-- Export from docs/report/: pandoc report.md --lua-filter colwidths.lua --pdf-engine=typst -o report.pdf
+     (and -o report.docx). Measured numbers come from evidence/; everything else from the repo docs. -->
 
 # 1. Executive summary
 
@@ -172,7 +171,7 @@ makes that acceptable, because it caps how many buyers reach the API.
 
 ## 3.2 Target HA design
 
-![Figure 1. Target HA architecture (design; source `figures/target-ha-architecture.mmd`).](figures/target-ha-architecture.png){height=21cm}
+![Target HA architecture (design; drawn by `figures/architecture.py`).](figures/target-ha-architecture.svg){width=100%}
 
 - **Edge.** Route 53 → CloudFront (`PriceClass_200`, redirect to HTTPS) with a WAF web ACL: the AWS managed common
   rule set plus an IP rate rule at 2,000 requests per 5 minutes. The SPA comes from a private S3 bucket through
@@ -198,7 +197,7 @@ makes that acceptable, because it caps how many buyers reach the API.
 At the proposal review the instructor asked us to **skip the NAT gateway, use one AZ and not implement HA, but still
 show the HA design**. The Terraform defaults build exactly that.
 
-![Figure 2. Deployed implementation (source `figures/implementation-architecture.mmd`).](figures/implementation-architecture.png){height=19cm}
+![Deployed implementation (drawn by `figures/architecture.py`).](figures/implementation-architecture.svg){width=100%}
 
 | Aspect | Implementation (deployed) | Target HA | Variable(s) |
 |---|---|---|---|
@@ -264,7 +263,7 @@ Alternatives we rejected:
 | UC4 | `POST /api/checkout/holds` → API → DynamoDB `GetItem` (admitted?) → RDS transaction. `…/confirm` → RDS transaction → SNS `order-events` → SQS `ticket-queue` → `ticket-fn` → Cognito `AdminGetUser` (email) → S3 PDF → SES → S3 `.sent` marker |
 | UC5 | Organiser → API Gateway (JWT) → `organiser` (checks the `organisers` group) → RDS; the dashboard is polled every 5 s |
 
-![Figure 3. On-sale purchase sequence (source `figures/purchase-sequence.mmd`).](figures/purchase-sequence.png)
+![On-sale purchase sequence (source `figures/purchase-sequence.mmd`).](figures/purchase-sequence.png)
 
 ## 5.2 Events
 
@@ -662,41 +661,30 @@ The state bucket and the budget are kept.
 
 # 10. Evidence
 
-**Method.** The tests are repeatable scripts in `loadtest/`:
+**Method.** Repeatable scripts in `loadtest/` (README has every command): k6 drives the API; shell scripts read
+CloudWatch, ECS and RDS; two drills change things (F1 stops the task, F4 restores RDS to a new instance and deletes
+it). Each run writes `loadtest/results/<test>-<UTC time>.{json,md}`; the curated copies are in `evidence/`.
+Conditions: tests call the **API Gateway URL directly**, bypassing CloudFront and the WAF (its 2,000 requests per
+5 min per IP would block one test machine); the stage throttle (100 req/s, burst 200) still applies, and `429`s are
+counted apart from failures; 125 Cognito test users with real tokens and SES mailbox-simulator addresses; k6 runs from
+Singapore, and the ALB's `TargetResponseTime` gives the server-side share.
 
-- **Load:** k6 drives the API.
-- **AWS-side numbers:** shell scripts collect them read-only from CloudWatch, ECS and RDS. Two drills change things:
-  F1 stops the task, and F4 restores RDS to a new instance and then deletes it.
-- **Results:** each run writes `loadtest/results/<test>-<UTC timestamp>.json` and `.md`. Screenshots are in
-  `docs/report/evidence/`.
-
-Test conditions:
-
-- **Target.** Every test calls the **API Gateway URL directly**, bypassing CloudFront and the WAF. The WAF's 2,000
-  requests per 5 minutes per IP (≈ 6.7 req/s) would block a single-machine test within minutes; that would only show
-  the WAF working.
-- **Throttle.** The API Gateway stage throttle (100 req/s, burst 200) still applies. The 10× burst (100 req/s) sits
-  exactly on that limit, so `429` responses are counted separately from real failures.
-- **Users.** 125 Cognito test users, signed in with real access tokens. Their addresses are on the SES mailbox
-  simulator, which the sandbox accepts.
-- **Latency.** k6 measures from the tester's machine, so its latency includes the network path to Singapore. The
-  ALB's `TargetResponseTime` gives the server-side share.
-
-| NFR | Method (`loadtest/README.md`) | Result | Pass? |
+| NFR | Method | Result (all on the deployed stack, 31 Oct–1 Nov 2026) | Pass? |
 |---|---|---|---|
-| NFR-1 | `nfr1-browse.js`: constant 10 req/s for 5 min; mix 30% list, 40% detail, 30% seat map. ALB p95/p99 per minute for the same window (`alb-metrics.sh`) | 3,000 requests, 0 errors. k6 (client, Singapore) p50 11 ms, **p95 30 ms, p99 43 ms**; slowest endpoint the seat map (p95 35 ms). ALB `TargetResponseTime` p95 11 ms, p99 20 ms; task CPU ≤ 15% (1 Nov, 02:57–03:02 UTC; `evidence/nfr1-browse.md`) | Pass (p95 < 300, p99 < 800) |
-| NFR-2 | `nfr2-burst.sh`: 10 req/s for 2 min → ramp to 100 req/s (10×) over 1 min → hold 10 min → cool 3 min, browse mix. Records the task count every 15 s, scaling activities and ALB metrics. **Run 1:** implementation scaling (1 task, max 3). **Run 2:** target-design scaling (min 2, max 4) | **Run 1:** 64,964 requests, **2,153 failed (3.3%)**, all in the 4 minutes before scale-out: the single 0.25 vCPU task reached 94% CPU at ≈ 60 req/s, its `/health` check timed out and ECS replaced it, leaving no healthy target for about a minute. Scaled 1 → 3 at 3.9 min; from then 0 errors, ALB p95 11 ms. **Run 2:** 69,601 requests, **0 failed**, 0 throttled, k6 p95 31 ms / p99 106 ms, ALB p95 ≤ 36 ms, CPU ≤ 54%; scaled 2 → 4 at 4.7 min, running at 5.3 min (1 Nov, 03:04–03:45 UTC; `evidence/nfr2-burst-run1.md`, `-run2.md`, Figure 4) | Run 1 fail (dropped requests). Run 2 pass on 0 dropped; scale-out 5.3 min vs 5 min target |
-| NFR-3 | `nfr3-oversell.js`: 100 admitted fans start at once and race for a pool of 20 seats, 2 per hold, retrying the seats still free; each payment fails with 10% probability, so declined seats are re-sold. Then `nfr3-oversell-check.sh` runs SQL inside the VPC (ECS Exec) for any seat in two confirmed orders, for this concert and for all concerts | Two runs (1 Nov, 09:30 and 09:35 UTC). Run 1: 147 hold attempts, 10 holds won, **137 lost races (409)**, 10 orders paid for 20 seats. Run 2: 152 attempts, 11 won, 141 lost, 1 declined payment re-sold, 10 orders for 20 seats. SQL in the VPC: 20 seats sold to 20 order lines per concert, **seats in two confirmed orders 0**, sold seats without an order 0; same over the whole database; 0 server errors (`evidence/nfr3-oversell.md`) | Pass |
-| NFR-4 | `nfr4-hold-expiry.js`: fan A holds a seat and walks away; from 20 s before expiry the seat map is polled every 2 s until the seat is available; fan B re-holds it; fan A's late payment must get `409 hold_expired` | Still `held` 20 s before expiry; available **0.6 s** after expiry (poll interval 2 s); fan B `201` at +0.6 s; fan A `409 hold_expired` (31 Oct, 16:29–16:40 UTC; `evidence/nfr4-hold-expiry.md`) | Pass (≤ 30 s) |
-| NFR-5 | `nfr5-f1-task-loss.sh` (F1): `aws ecs stop-task` on the only task; `/health` polled every second through API Gateway until it is stable at 200 again; ECS events recorded | First failed probe 8 s after the stop; ECS started the replacement at +54 s, it passed the ALB health check at +82 s; `/health` 200 again at **+84 s: outage 76 s** (1 Nov, 09:26–09:28 UTC; `evidence/nfr5-f1-task-loss.md`). With two tasks (target design) the ALB would route around the loss; AZ loss is design only | Pass (task loss RTO ≤ 5 min) |
-| NFR-6 | `nfr6-waiting-room.js`: a fresh concert whose sale opens in 120 s; 20 fans join 200 ms apart; their status is polled until admitted. Admit batch lowered to 5 for this run, so admission spans several runs. Checks: queue position = join order, and no fan admitted by a later run than someone who joined earlier | 20 fans, positions 1–20 in join order, **4 admit runs** of 5 one minute apart (first run 41 s after the sale opened); position inversions **0**; admission inversions **0** (31 Oct, 16:29–16:35 UTC; `evidence/nfr6-waiting-room.md`) | Pass |
-| NFR-7 | `nfr7-eticket.sh` + Logs Insights over `ticket-fn` (`deliveryLatencyMs` = SES accepted minus order confirmed), SQS age, DLQ depth, SES sends | Run 2's 10 orders: **all emailed within 60 s, p50 4.4 s, p95 9.9 s**, DLQ 0. Run 1's 10 orders failed their first attempt (an IAM gap: SESv2 raw sends need `ses:SendRawEmail`), stayed in the queue, and were all emailed on the retry after the fix, 6 min later; none lost (`evidence/nfr7-eticket.md`) | Pass (after the fix) |
-| NFR-8/9 | `nfr8-f4-pitr.sh` (F4): reads `LatestRestorableTime`, restores to a new instance (same subnet group and SG, private), times it from the RDS event log, then deletes it | Restore point **168 s** before the request (RPO); restored database accepting connections after **9 min 14 s**, instance `available` after 28 min 28 s (RTO) (31 Oct, 16:27–16:56 UTC; `evidence/nfr8-f4-pitr.md`) | Pass (RPO ≤ 30 min, RTO ≤ 1 h) |
-| NFR-10 | `nfr10-config.sh` (read-only): RDS encryption and public access, private subnet routes, internal ALB, CloudFront HTTPS redirect, WAF, API Gateway | RDS `PubliclyAccessible = false`, KMS-encrypted, DB subnets without an internet route; ALB `internal`; CloudFront redirects HTTP → HTTPS on every behaviour, S3 origin through OAC; API Gateway HTTPS only; WAF common rules + rate limit; S3 buckets SSE + public access blocked; all SQS queues encrypted (`evidence/nfr10-config.md`). Inside the VPC the VPC link → ALB hop is HTTP (Section 9.5) | Pass |
-| NFR-11 | Billing / Cost Explorer vs USD 80; Budgets alerts | October usage USD 22.92 (USD 0 after credits); Budgets `ticketmastery-dev-monthly-cost` at USD 80 with alerts at 20/40/60/80 and on forecast (`evidence/nfr11-cost.md`) | Pass so far |
+| NFR-1 | 10 req/s for 5 min of list / detail / seat map | 3,000 requests, 0 errors; k6 **p95 30 ms, p99 43 ms** (seat map p95 35 ms); ALB p95 11 ms, p99 20 ms; CPU ≤ 15% | Pass |
+| NFR-2 | 10 → 100 req/s (10×) in 1 min, held 10 min. Run 1: 1 task, max 3 (implementation). Run 2: min 2, max 4 (target design) | Run 1: **2,153 of 64,964 requests failed (3.3%)** in the 4 min before scale-out: one 0.25 vCPU task hit 94% CPU at ≈ 60 req/s, its `/health` timed out and ECS replaced it; 1 → 3 tasks at 3.9 min, then 0 errors. Run 2: **0 of 69,601 failed**, 0 throttled, k6 p95 31 ms, CPU ≤ 54%; 2 → 4 tasks decided at 4.7 min, running at 5.3 min (Figure 4) | Run 1 fail; run 2 pass on errors, 5.3 vs 5 min scale-out |
+| NFR-3 | 100 admitted fans race for 20 seats (2 per hold, 10% of payments declined), twice; then SQL inside the VPC (ECS Exec) | 299 hold attempts, **278 lost races (409)**, 20 orders for 40 seats, 1 declined seat re-sold, 0 server errors. SQL: **0 seats in two confirmed orders**, 0 sold seats without an order, per concert and for the whole database | Pass |
+| NFR-4 | Hold a seat, poll the seat map every 2 s around expiry, re-hold, pay late | Available **0.6 s** after expiry; fan B re-held it (`201`); fan A's late payment `409 hold_expired` | Pass (≤ 30 s) |
+| NFR-5 | F1: `ecs stop-task` on the only task; `/health` polled every second | Replacement started at +54 s, healthy at +82 s; **outage 76 s**. With two tasks the ALB routes around a lost task; AZ loss is design only | Pass (≤ 5 min) |
+| NFR-6 | 20 fans join 200 ms apart before the sale; admit batch lowered to 5 for this run, then restored to 500 | Positions 1–20 = join order; **4 admit runs** one minute apart; **0 inversions** in position or admission | Pass |
+| NFR-7 | `ticket-fn`'s `deliveryLatencyMs` (SES accepted − order confirmed) over the NFR-3 orders | Run 2: **10/10 emailed within 60 s, p95 9.9 s**. Run 1 exposed an IAM gap (SESv2 raw sends need `ses:SendRawEmail`): all 10 failed once, stayed queued, and were emailed on the retry after the fix; none lost | Pass (after the fix) |
+| NFR-8/9 | F4: point-in-time restore to a new private instance, timed from the RDS event log, then deleted | Restore point **168 s** before the request; database accepting connections after **9 min 14 s** (`available` at 28 min) | Pass |
+| NFR-10 | Read-only configuration checks | RDS private and KMS-encrypted; DB subnets without an internet route; ALB internal; CloudFront and API Gateway HTTPS only; WAF on; S3 and SQS encrypted. VPC link → ALB is HTTP inside the VPC (Section 9.5) | Pass |
+| NFR-11 | Cost Explorer and Budgets | October usage USD 22.92 (USD 0 after credits); budget USD 80 with alerts | Pass so far |
 
-For NFR-6, the admit batch was lowered from 500 to 5 for the run (`-var admit_batch_size=5`, then restored), so the
-20 fans were admitted over four scheduled runs; with 500 they would all be admitted by one run.
+Evidence files: `evidence/nfr1-browse.md`, `nfr2-burst-run1.md`, `nfr2-burst-run2.md`, `nfr3-oversell.md`,
+`nfr4-hold-expiry.md`, `nfr5-f1-task-loss.md`, `nfr6-waiting-room.md`, `nfr7-eticket.md`, `nfr8-f4-pitr.md`,
+`nfr10-config.md`, `nfr11-cost.md`, `monitoring-alerts.md`.
 
 ![NFR-2 bursts: requests and target 5xx per minute (left axis) and healthy tasks (right axis). Run 1 (03:06–03:17
 UTC) starts with one task; run 2 (03:27–03:38 UTC) with two.](evidence/nfr2-bursts-requests.png){width=95%}
@@ -711,16 +699,23 @@ scale out ahead of each announced on-sale with a scheduled action (the proposal 
 two tasks, and add a faster step-scaling policy on a high-resolution alarm. The waiting room bounds the transactional
 load, but browse traffic is not gated by it.
 
-**Functional evidence.** Screenshots on the CloudFront URL:
+**Functional evidence.** On 1 Nov (09:39–09:44 UTC) one fan account went through the whole flow on the CloudFront
+URL, and an organiser opened the live dashboard (Figure 5; full screenshots in `evidence/screens/`):
 
-1. UC1 browse;
-2. UC3 queued, then admitted;
-3. UC4 hold with its countdown, then confirm;
-4. UC2 My Tickets, the PDF download, and the e-ticket email;
-5. UC5 create → publish → live dashboard → cancel;
-6. the reporting views returning the demo concert's sales.
+1. UC1: concert list and detail (`uc1-concert-list.jpg`, `uc1-concert-detail.jpg`);
+2. UC3: queue number #4, admitted 18 s later by the next scheduled run (`uc3-waiting-room-queued.jpg`,
+   `uc3-waiting-room-admitted.jpg`);
+3. UC4: two seats selected, the 10-minute hold, simulated payment, confirmation (`uc4-seat-selection.jpg`,
+   `uc4-hold-countdown.jpg`, `uc4-confirmation.jpg`);
+4. UC2: My Tickets, the ticket page, and the PDF downloaded through its pre-signed link: 3,878 bytes from the private
+   bucket's `tickets/<orderId>.pdf` (`uc2-my-tickets.jpg`, `uc2-ticket-page.jpg`, `uc2-eticket-pdf.png`). The fan's
+   address is an SES mailbox-simulator address, so the email itself was accepted by SES rather than read in an inbox;
+   the live demo uses a verified inbox;
+5. UC5: the organiser's concerts and live dashboard (sold 20/1000, revenue SGD 1,000 after the NFR-3 run)
+   (`uc5-organiser-concerts.jpg`, `uc5-organiser-dashboard.jpg`);
+6. UC5 reporting: the views on the live database return the same totals (`evidence/uc5-reporting-views.md`).
 
-<!-- EVIDENCE: screenshot file names per item, and the monitoring screenshots (dashboard, alarm email) -->
+![The deployed system on the CloudFront URL (1 Nov 2026).](evidence/functional-walkthrough.jpg){width=100%}
 
 # 11. Instructor feedback and our response
 

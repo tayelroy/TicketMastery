@@ -28,6 +28,25 @@ Submission is done when all of these hold:
    with a rehearsed live-demo script.
 6. `main` contains everything, deployed from `main`; the README status tables and docs match what is deployed.
 
+## Status (1 Nov 2026, 10:00 UTC)
+
+| # | Status | Notes |
+|---|---|---|
+| W1 UC2 | Done | PR #19 merged into `feat/final-integration` with Andrew's later fixes (seat order, PDF check, coverage); Cognito attribute fix applied and smoke-tested (email change pending until verified; `phone_number` write rejected) |
+| W2 e-tickets | Done | `ticket-fn` live; first live run exposed a missing `ses:SendRawEmail` permission, fixed and re-tested (NFR-7) |
+| W3 UC3 admit | Done | Admit schedule live; checkout enforces admission |
+| W4 monitoring | Done | 19 alarms + dashboard + Budgets; alarms fired during the burst test; email delivery tested |
+| W5 reporting | Done | Views live; QuickSight design only (`docs/reporting.md`) |
+| W6 evidence | Done | NFR-1–11 measured; results in `docs/report/evidence/` |
+| W7 deploy | Done | API image `d1bd6e8` (+ `ticket-fn` fix), frontend redeployed; stack live on CloudFront |
+| W8 report | Done | `docs/report/report.md` → `report.pdf` (19 pages) and `report.docx` |
+| W9 slides + demo | Outline done | `slides.md` (21 slides, 19.75 min) and `demo-script.md`; the team lays out the Canva deck and rehearses |
+| W10 docs | Done | Status tables, architecture decisions, cost estimate (whole stack ≈ USD 72/month) |
+
+Left for the team: review and merge the integration PR (CODEOWNERS approvals); lay out the slides in Canva and
+rehearse the demo (`demo-script.md`: verify the demo fans' emails in SES first); peer evaluation (individual);
+`terraform destroy` after the presentation.
+
 ## Starting point (checked 2026-10-31)
 
 | Area | State |
