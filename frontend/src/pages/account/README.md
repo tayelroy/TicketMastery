@@ -2,7 +2,8 @@
 
 **Owner:** Andrew
 **Calls:** `/api/me` (API module `services/ticketmastery-api/src/modules/account/`) and Cognito (profile)
-**Status:** implemented. E-ticket downloads say "not ready yet" until UC4's PDF bucket exists (the API answers `503`).
+**Status:** implemented. E-ticket downloads say "not ready yet" until UC4's PDF bucket exists (the API answers `503`),
+and "still being prepared" while ticket-fn hasn't written an order's PDF (`409`).
 
 ## Routes
 
@@ -10,23 +11,24 @@ All signed in (`RequireAuth`).
 
 - `/myaccount`: my tickets, split into **Upcoming** (soonest first) and **Past** (most recent first), plus the
   profile card. A ticket for a concert the organiser cancelled shows a "Concert cancelled" badge.
-- `/myaccount/tickets`: redirects to `/myaccount` (the checkout confirmation links here).
 - `/myaccount/tickets/:ticketId`: one e-ticket: concert, date and time, venue, order number, each seat with its
   ticket type and price, booking fee and total, and **Download e-ticket (PDF)**. `ticketId` is the order id (one
-  e-ticket per order).
+  e-ticket per order). The checkout confirmation's "My Tickets" button opens the ticket just bought.
 
 ## API endpoints used
 
 - `GET /api/me/orders`: my confirmed orders (`types.ts` mirrors the response)
 - `GET /api/me/tickets/:id`: one order; `404` for an unknown order or someone else's
 - `GET /api/me/tickets/:id/download`: `{ url }`, a 5-minute pre-signed S3 link; the page navigates to it and the PDF
-  downloads as an attachment
+  downloads as an attachment. `409` (PDF not written yet) and `503` (no bucket yet) show a message instead.
 
 ## Profile
 
 `ProfileCard.tsx` reads and updates the user's Cognito attributes in the browser with Amplify
 (`fetchUserAttributes`, `updateUserAttributes`): the display name (`name`) is editable, the email (the sign-in name)
-is read-only. The API stores no profile. With the fake login (`VITE_AUTH_MODE=dev-header`) the card only shows a note.
+is read-only. After saving, the card refreshes the tokens, so the header and the home greeting show the new name
+right away (`src/auth/session.ts` uses `name`, else the email). The API stores no profile. With the fake login
+(`VITE_AUTH_MODE=dev-header`) the card only shows a note.
 
 ## Notes
 
