@@ -119,7 +119,11 @@ async function processOrderConfirmed(deps: Deps, event: OrderConfirmedEvent, log
     },
     `=_ticketmastery_${orderId}`,
   );
-  const sent = await deps.ses.send(new SendEmailCommand({ Content: { Raw: { Data: raw } } }));
+  // FromEmailAddress makes the IAM `ses:FromAddress` condition match the sender explicitly instead of relying on how SES
+  // reads the raw From header.
+  const sent = await deps.ses.send(
+    new SendEmailCommand({ FromEmailAddress: deps.fromAddress, Content: { Raw: { Data: raw } } }),
+  );
 
   const now = (deps.now ?? Date.now)();
   await deps.s3.send(

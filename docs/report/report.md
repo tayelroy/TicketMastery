@@ -464,7 +464,7 @@ verified, which is why the Lambda's maximum concurrency is 2. Production access 
 | Waiting room | 500 admissions per concert per minute; 15-minute admission | Turns a 50,000–100,000-fan spike into a bounded stream of buyers |
 | API Gateway throttle | 100 rps steady, 200 burst | Sheds excess with `429` before it reaches the task |
 | WAF rate rule | 2,000 requests / 5 min per IP | Stops single-source floods and simple bots |
-| ECS autoscaling | Target tracking: CPU 60%, 500 ALB requests per task per minute. Target design min 2, max 4+; max 3 for the burst test | Adds tasks during the admitted surge and removes them afterwards |
+| ECS autoscaling | Target tracking: CPU 60%, 500 ALB requests per task per minute. Target design min 2, max 4+. Measured scale-out: 4–5 min from the start of a burst (NFR-2) | Adds tasks during the admitted surge and removes them afterwards. Too slow alone for a spike that starts from one task (Section 10), so on-sales need pre-scaling (Section 12) |
 | DynamoDB, SQS, SNS, Lambda | On-demand, per request | Nothing to provision on the parts that face the spike |
 | RDS | `db.t4g.micro`; `DB_POOL_MAX` 10 per task; ≈ 80 `max_connections` | 4 tasks use at most 40 connections. Next steps: a larger class, then read replicas for reporting |
 
@@ -605,7 +605,10 @@ public ALB. Every change is `plan -out` → review → `apply` of that plan, ann
   and end dates (instructor feedback d).
 - **Pay per request** for everything idle between on-sales: waiting room, e-tickets and API Gateway.
 
-<!-- EVIDENCE: actual spend to date (Billing / Cost Explorer) and the Budgets screenshot file -->
+**Actual spend.** Cost Explorer shows **USD 22.92** of usage in October 2026 (stack deployed from 22 Oct), all
+covered by credits, so USD 0 was charged. A full day costs USD 2.02 since the ALB became internal (estimate ≈ 2.4).
+The largest items match the estimate's order: ALB 8.26, RDS 6.21, Fargate 3.34, public IPv4 2.93, WAF 2.05
+(`evidence/nfr11-cost.md`, Appendix B).
 
 ## 9.5 Security
 
@@ -677,18 +680,31 @@ Test conditions:
 | NFR | Method (`loadtest/README.md`) | Result | Pass? |
 |---|---|---|---|
 | NFR-1 | `nfr1-browse.js`: constant 10 req/s for 5 min; mix 30% list, 40% detail, 30% seat map. ALB p95/p99 per minute for the same window (`alb-metrics.sh`) | 3,000 requests, 0 errors. k6 (client, Singapore) p50 11 ms, **p95 30 ms, p99 43 ms**; slowest endpoint the seat map (p95 35 ms). ALB `TargetResponseTime` p95 11 ms, p99 20 ms; task CPU ≤ 15% (1 Nov, 02:57–03:02 UTC; `evidence/nfr1-browse.md`) | Pass (p95 < 300, p99 < 800) |
-| NFR-2 | `nfr2-burst.sh`, autoscaling on (max 3): 10 req/s for 2 min → ramp to 100 req/s over 1 min → hold 10 min → cool 3 min. Records the task count every 15 s, scaling activities and ALB metrics | Peak <!-- EVIDENCE: req/s -->; tasks 1 → <!-- EVIDENCE: max --> after <!-- EVIDENCE: min from ramp start -->; 429s <!-- EVIDENCE: count -->; dropped (non-429) <!-- EVIDENCE: count --> | <!-- EVIDENCE --> |
+| NFR-2 | `nfr2-burst.sh`: 10 req/s for 2 min → ramp to 100 req/s (10×) over 1 min → hold 10 min → cool 3 min, browse mix. Records the task count every 15 s, scaling activities and ALB metrics. **Run 1:** implementation scaling (1 task, max 3). **Run 2:** target-design scaling (min 2, max 4) | **Run 1:** 64,964 requests, **2,153 failed (3.3%)**, all in the 4 minutes before scale-out: the single 0.25 vCPU task reached 94% CPU at ≈ 60 req/s, its `/health` check timed out and ECS replaced it, leaving no healthy target for about a minute. Scaled 1 → 3 at 3.9 min; from then 0 errors, ALB p95 11 ms. **Run 2:** 69,601 requests, **0 failed**, 0 throttled, k6 p95 31 ms / p99 106 ms, ALB p95 ≤ 36 ms, CPU ≤ 54%; scaled 2 → 4 at 4.7 min, running at 5.3 min (1 Nov, 03:04–03:45 UTC; `evidence/nfr2-burst-run1.md`, `-run2.md`, Figure 4) | Run 1 fail (dropped requests). Run 2 pass on 0 dropped; scale-out 5.3 min vs 5 min target |
 | NFR-3 | `nfr3-oversell.js`: 100 admitted fans start at once and race for a pool of 20 seats, 2 per hold, retrying the seats still free; 10% of payments fail on purpose, so seats churn. Then `nfr3-oversell-check.sh` runs SQL inside the VPC (ECS Exec) for any seat in two confirmed orders, for this concert and for all concerts | Lost races (409) <!-- EVIDENCE: count -->; seats in two confirmed orders <!-- EVIDENCE: expect 0 --> | <!-- EVIDENCE --> |
 | NFR-4 | `nfr4-hold-expiry.js`: fan A holds a seat and walks away; from 20 s before expiry the seat map is polled every 2 s until the seat is available; fan B re-holds it; fan A's late payment must get `409 hold_expired` | Still `held` 20 s before expiry; available **0.6 s** after expiry (poll interval 2 s); fan B `201` at +0.6 s; fan A `409 hold_expired` (31 Oct, 16:29–16:40 UTC; `evidence/nfr4-hold-expiry.md`) | Pass (≤ 30 s) |
-| NFR-5 | `nfr5-f1-task-loss.sh` (F1): `aws ecs stop-task` on the only task; `/health` polled through API Gateway until it is stable at 200 again; ECS events recorded | Outage <!-- EVIDENCE: s -->; AZ loss design only | <!-- EVIDENCE --> |
+| NFR-5 | `nfr5-f1-task-loss.sh` (F1): `aws ecs stop-task` on the only task; `/health` polled every second through API Gateway until it is stable at 200 again; ECS events recorded | First failed probe 8 s after the stop; ECS started the replacement at +54 s, it passed the ALB health check at +82 s; `/health` 200 again at **+84 s: outage 76 s** (1 Nov, 09:26–09:28 UTC; `evidence/nfr5-f1-task-loss.md`). With two tasks (target design) the ALB would route around the loss; AZ loss is design only | Pass (task loss RTO ≤ 5 min) |
 | NFR-6 | `nfr6-waiting-room.js`: a fresh concert whose sale opens in 120 s; 20 fans join 200 ms apart; their status is polled until admitted. Admit batch lowered to 5 for this run, so admission spans several runs. Checks: queue position = join order, and no fan admitted by a later run than someone who joined earlier | 20 fans, positions 1–20 in join order, **4 admit runs** of 5 one minute apart (first run 41 s after the sale opened); position inversions **0**; admission inversions **0** (31 Oct, 16:29–16:35 UTC; `evidence/nfr6-waiting-room.md`) | Pass |
 | NFR-7 | `nfr7-eticket.sh` over the NFR-3 window: Logs Insights over `ticket-fn` (`deliveryLatencyMs` = SES accepted minus order confirmed), SQS oldest-message age, DLQ depth, SES sends | Emails <!-- EVIDENCE: n -->; p95 <!-- EVIDENCE: s -->; within 60 s <!-- EVIDENCE: % -->; max SQS age <!-- EVIDENCE: s --> | <!-- EVIDENCE --> |
 | NFR-8/9 | `nfr8-f4-pitr.sh` (F4): reads `LatestRestorableTime`, restores to a new instance (same subnet group and SG, private), times it from the RDS event log, then deletes it | Restore point **168 s** before the request (RPO); restored database accepting connections after **9 min 14 s**, instance `available` after 28 min 28 s (RTO) (31 Oct, 16:27–16:56 UTC; `evidence/nfr8-f4-pitr.md`) | Pass (RPO ≤ 30 min, RTO ≤ 1 h) |
 | NFR-10 | `nfr10-config.sh` (read-only): RDS encryption and public access, private subnet routes, internal ALB, CloudFront HTTPS redirect, WAF, API Gateway | RDS `PubliclyAccessible = false`, KMS-encrypted, DB subnets without an internet route; ALB `internal`; CloudFront redirects HTTP → HTTPS on every behaviour, S3 origin through OAC; API Gateway HTTPS only; WAF common rules + rate limit; S3 buckets SSE + public access blocked; all SQS queues encrypted (`evidence/nfr10-config.md`). Inside the VPC the VPC link → ALB hop is HTTP (Section 9.5) | Pass |
-| NFR-11 | Billing / Cost Explorer vs USD 80; Budgets alerts | <!-- EVIDENCE: USD to date --> | <!-- EVIDENCE --> |
+| NFR-11 | Billing / Cost Explorer vs USD 80; Budgets alerts | October usage USD 22.92 (USD 0 after credits); Budgets `ticketmastery-dev-monthly-cost` at USD 80 with alerts at 20/40/60/80 and on forecast (`evidence/nfr11-cost.md`) | Pass so far |
 
 For NFR-6, the admit batch was lowered from 500 to 5 for the run (`-var admit_batch_size=5`, then restored), so the
 20 fans were admitted over four scheduled runs; with 500 they would all be admitted by one run.
+
+![NFR-2 bursts: requests and target 5xx per minute (left axis) and healthy tasks (right axis). Run 1 (03:06–03:17
+UTC) starts with one task; run 2 (03:27–03:38 UTC) with two.](evidence/nfr2-bursts-requests.png){width=95%}
+
+**What NFR-2 taught us.** One 0.25 vCPU task saturates at about 60 req/s. Target tracking needs three one-minute
+datapoints above target before it acts, and a new task needs about 40 s to pass its health check, so scale-out
+takes 4–5 minutes. Run 1 also showed a failure mode: the `/health` check includes a database `SELECT 1`, so when the
+only task was overloaded its health check timed out and ECS replaced it, turning slow responses into errors. With
+two tasks as the floor (the target design), the same burst caused no errors before the scale-out finished, so the
+requirement holds for the HA design and not for the single-task implementation. Fixes for production, in order:
+scale out ahead of each announced on-sale with a scheduled action (the proposal already planned this), keep at least
+two tasks, and add a faster step-scaling policy on a high-resolution alarm. The waiting room bounds the transactional
+load, but browse traffic is not gated by it.
 
 **Functional evidence.** Screenshots on the CloudFront URL:
 
@@ -732,6 +748,9 @@ For NFR-6, the admit batch was lowered from 500 to 5 for the run (`-var admit_ba
   (ap-southeast-7) and Hong Kong (ap-east-1) are the candidate regions.
 - **Edge caching of the concert list.** A CloudFront behaviour for `GET /api/concerts*` that honours the API's
   `max-age`, so browsing during an on-sale never reaches the origin.
+- **Faster scaling.** A scheduled scaling action that raises the task minimum before each announced on-sale (organisers
+  set the sale time, so it is known), plus step scaling on a high-resolution alarm; and a health check that doesn't
+  fail a busy task (liveness without the database query). NFR-2 run 1 shows why (Section 10).
 - **Admission control.** Per-feature ECS services (feedback b) once traffic justifies them. An adaptive batch size
   that shrinks admissions while latency or error alarms fire.
 - **Real payments.** Stripe, with an idempotency key per order and a signature-verified webhook. The checkout-failure
@@ -796,4 +815,7 @@ Estimates.
 deployed. Pay-per-request services (CloudFront, S3, API Gateway, Cognito, Lambda, SQS, SNS, DynamoDB, Scheduler, SES)
 are near zero at dev traffic and mostly inside free tiers; `docs/cost-estimate.md` itemises them.
 
-<!-- EVIDENCE: actual monthly bill / Cost Explorer breakdown next to this estimate -->
+**Actual cost against the estimate.** Cost Explorer (usage before credits) shows the deployed stack at **USD 2.26 per
+day** from 23 to 26 Oct and **USD 2.02 per day** from 28 to 30 Oct, after the ALB became internal (its two public IPv4
+addresses went away). The estimate for the whole stack is ≈ USD 2.4/day; the measured days were idle dev days, so
+pay-per-request items were near zero. October total: USD 22.92, all covered by credits (`evidence/nfr11-cost.md`).

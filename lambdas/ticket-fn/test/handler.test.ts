@@ -84,6 +84,8 @@ function fakeAws() {
     ses: {
       send: (async (command: unknown) => {
         assert.ok(command instanceof SendEmailCommand);
+        // The IAM policy only allows sending when ses:FromAddress is the configured sender.
+        assert.equal(command.input.FromEmailAddress, 'sender@example.com');
         if (state.failSes) throw Object.assign(new Error('Maximum sending rate exceeded'), { name: 'TooManyRequests' });
         emails.push(command.input.Content!.Raw!.Data!);
         return { MessageId: `ses-${emails.length}` };

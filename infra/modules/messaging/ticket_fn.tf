@@ -157,7 +157,7 @@ data "aws_iam_policy_document" "ticket_fn" {
   # The condition still limits the function to sending as the configured sender.
   statement {
     sid       = "SendAsTicketSender"
-    actions   = ["ses:SendEmail"]
+    actions   = ["ses:SendEmail", "ses:SendRawEmail"] # SESv2 SendEmail with raw content is authorised as SendRawEmail
     resources = ["arn:aws:ses:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:identity/*"]
 
     condition {
