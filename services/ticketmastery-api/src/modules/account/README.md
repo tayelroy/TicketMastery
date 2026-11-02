@@ -39,7 +39,8 @@ A ticket is an order: ticket-fn renders one PDF per `OrderConfirmed`, so `ticket
   seat numbers sorted as numbers (2 before 10), like discovery's seat map.
 - `pending`, `cancelled` and `expired` orders are checkout attempts that never became tickets, so they are left out.
 - `concert.status` is the concert's current status: an organiser can cancel a concert after tickets were sold, and
-  the order stays `confirmed` (UC5's `ConcertCancelled` event is still a TODO).
+  the order stays `confirmed` (refunds are out of scope). The fan also gets a cancellation email (organiser module's
+  `ConcertCancelled` event, sent by ticket-fn).
 
 | Status | `error.code` | When |
 |---|---|---|
