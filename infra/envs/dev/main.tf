@@ -220,6 +220,8 @@ module "messaging" {
   cognito_user_pool_arn = module.auth_apigw.user_pool_arn
   log_retention_days    = var.log_retention_days
   alarm_actions         = [module.monitoring.alerts_topic_arn]
+  # Testing only (Shi Hui, PR #20): where ticket-fn sends emails for fans without a Cognito user.
+  fallback_recipient_email = var.ticket_fallback_recipient_email
 }
 
 # Monitoring and alerts - Elroy

@@ -246,12 +246,14 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - Cognito group `organisers`, checked by the API; organisers see only their own concerts
   - Draft → ticket types → seat layout (one transaction) → publish; layout locks when the sale opens
   - Live dashboard: available, held, sold and revenue per ticket type, refreshed every 5 s
+  - Cancel: every ticket holder is emailed (one `ConcertCancelled` per order → `ticket-fn` → SES)
   - Five tested SQL reporting views; QuickSight designed, not deployed
 - **Figure:** screenshot *to take* `demo-03-organiser-dashboard.png` (Sales panel with the lock banner).
 - **Speaker notes:** Organisers create a draft, add ticket types and a seat layout, and publish. The whole layout is
   replaced in one transaction, and publishing needs exactly one seat per ticket. Once the sale opens the layout locks,
-  enforced in the service and by database triggers. The live dashboard reads the same seat rows checkout updates. For
-  reporting we built five SQL views with tests; QuickSight on top is designed but not deployed.
+  enforced in the service and by database triggers. The live dashboard reads the same seat rows checkout updates.
+  Cancelling a concert emails every ticket holder through the same pipeline as e-tickets, with Shi Hui's message
+  design. For reporting we built five SQL views with tests; QuickSight on top is designed but not deployed.
 
 ## Slide 13. Live demo
 
@@ -380,14 +382,15 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
 - **Presenter:** Nai Xin · **Minutes:** 0.50
 - **On slide:**
   - HA, Multi-AZ RDS and permanent autoscaling are design-only: a `tfvars` change, ≈ USD 194/month
-  - QuickSight not deployed; cancellation emails to ticket holders not built (`ticket-fn` skips `ConcertCancelled`)
+  - QuickSight not deployed; refunds on cancellation are only promised in the email, not processed
   - Concert list not cached at CloudFront (`/api/*` uses `CachingDisabled`); API image still deployed by hand
   - Before production: real payments (Stripe), SES production access, HTTPS on the ALB, Cognito MFA, bot protection
 - **Figure:** none (text slide).
 - **Speaker notes:** Some things are deliberately not done. HA is designed and one variable change away, but costs
-  almost three times as much. QuickSight is designed but not deployed, and cancelling a concert does not yet email
-  ticket holders. Before real customers we'd cache the concert list at CloudFront and add Stripe payments, SES
-  production access, HTTPS on the ALB, MFA and bot protection.
+  almost three times as much. QuickSight is designed but not deployed. Cancelling a concert emails every ticket
+  holder, but the refund it promises is not processed, because payments are simulated. Before real customers we'd
+  cache the concert list at CloudFront and add Stripe payments, SES production access, HTTPS on the ALB, MFA and bot
+  protection.
 
 ## Slide 21. Summary and Q&A
 

@@ -193,11 +193,15 @@ resource "aws_lambda_function" "ticket_fn" {
   memory_size      = var.ticket_fn_memory_mb
 
   environment {
-    variables = {
-      TICKET_PDF_BUCKET    = aws_s3_bucket.tickets.id
-      SES_FROM_ADDRESS     = var.ses_from_address
-      COGNITO_USER_POOL_ID = var.cognito_user_pool_id
-    }
+    # FALLBACK_RECIPIENT_EMAIL only when configured, so its absence means "no fallback" in the function.
+    variables = merge(
+      {
+        TICKET_PDF_BUCKET    = aws_s3_bucket.tickets.id
+        SES_FROM_ADDRESS     = var.ses_from_address
+        COGNITO_USER_POOL_ID = var.cognito_user_pool_id
+      },
+      var.fallback_recipient_email == "" ? {} : { FALLBACK_RECIPIENT_EMAIL = var.fallback_recipient_email },
+    )
   }
 
   tags = merge(var.tags, {

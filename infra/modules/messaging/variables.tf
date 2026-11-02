@@ -58,6 +58,12 @@ variable "alarm_actions" {
   default     = []
 }
 
+variable "fallback_recipient_email" {
+  description = "Testing only: verified SES address ticket-fn emails when a fan has no Cognito user (dev-header ids such as fan-1). Empty = not set."
+  type        = string
+  default     = ""
+}
+
 variable "max_receive_count" {
   description = "Failed deliveries before a ticket-queue message moves to the DLQ."
   type        = number

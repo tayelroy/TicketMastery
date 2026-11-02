@@ -243,6 +243,24 @@ export async function cancelConcert(db: Queryable, id: string, reason: string) {
   return rows[0]!;
 }
 
+export interface ConfirmedOrderRow {
+  id: string;
+  fan_id: string;
+  currency: string;
+  total_cents: number;
+}
+
+/** Confirmed orders of a concert, the ones whose fans get a cancellation notice (UC4's orders table, read only). */
+export async function listConfirmedOrders(db: Queryable, concertId: string) {
+  const { rows } = await db.query<ConfirmedOrderRow>(
+    `SELECT id, fan_id, currency, total_cents FROM orders
+      WHERE concert_id = $1 AND status = 'confirmed'
+      ORDER BY confirmed_at, id`,
+    [concertId],
+  );
+  return rows;
+}
+
 /** Live counts per ticket type; ticket types without seats yet still appear with zeros. */
 export async function dashboardCounts(db: Queryable, concertId: string) {
   const { rows } = await db.query<DashboardRow>(

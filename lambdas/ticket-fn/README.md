@@ -1,7 +1,9 @@
 # ticket-fn
 
 UC4 e-tickets (owner: Shi Hui). For every paid order it renders a one-page PDF e-ticket, stores it in S3 for the
-UC2 download link, and emails it to the fan through SES.
+UC2 download link, and emails it to the fan through SES. When an organiser cancels a concert (UC5), it emails each
+ticket holder a cancellation notice. The cancellation handling and the fallback recipient follow Shi Hui's design in
+PR #20.
 
 | | |
 |---|---|
@@ -12,26 +14,40 @@ UC2 download link, and emails it to the fan through SES.
 
 ## What it does
 
-Per SQS record:
+Per SQS record, it reads the `eventType` message attribute (falling back to the body's `type`) and handles:
 
-1. Reads the `eventType` message attribute (falls back to the body's `type`). Anything other than `OrderConfirmed`
-   (e.g. `ConcertCancelled`) is logged and skipped, and the record counts as handled.
-2. Validates the body against `OrderConfirmedEvent` v1 (copied in [`src/event.ts`](src/event.ts) from the publisher,
-   [`checkout/events.ts`](../../services/ticketmastery-api/src/modules/checkout/events.ts); keep them in step).
-3. Skips the order if the sent marker `tickets/<orderId>.sent` exists (see [Idempotency](#idempotency)).
-4. Renders the PDF ([`src/pdf.ts`](src/pdf.ts), pdf-lib): concert title, artist, venue, start time in Singapore time,
+| Event | Effect |
+|---|---|
+| `OrderConfirmed` v1 | E-ticket: steps below |
+| `ConcertCancelled` v1 | Cancellation notice: one plain-text email (concert, reason, refund amount), no attachment, sent once per order (marker `tickets/<orderId>.cancelled.sent`) |
+| anything else | logged (`event type not handled; skipped`) and counted as handled |
+
+Both event shapes are copied in [`src/event.ts`](src/event.ts) from their publishers,
+[`checkout/events.ts`](../../services/ticketmastery-api/src/modules/checkout/events.ts) and
+[`organiser/events.ts`](../../services/ticketmastery-api/src/modules/organiser/events.ts); keep them in step.
+
+For `OrderConfirmed`:
+
+1. Validates the body against `OrderConfirmedEvent` v1.
+2. Skips the order if the sent marker `tickets/<orderId>.sent` exists (see [Idempotency](#idempotency)).
+3. Renders the PDF ([`src/pdf.ts`](src/pdf.ts), pdf-lib): concert title, artist, venue, start time in Singapore time,
    order id with a QR code of it, one line per seat (section, row, seat, ticket type, price), subtotal, booking fee,
    total. Checkout caps an order at 20 seats, which fit on one A4 page.
-5. Writes it to `s3://<TICKET_PDF_BUCKET>/tickets/<orderId>.pdf` (`application/pdf`), the key the API's
+4. Writes it to `s3://<TICKET_PDF_BUCKET>/tickets/<orderId>.pdf` (`application/pdf`), the key the API's
    [account module](../../services/ticketmastery-api/src/modules/account/README.md) pre-signs for downloads.
-6. Looks up the fan's email with Cognito `AdminGetUser` (`Username` = the event's `fanId`: the pool signs in by email,
-   so every username is the user's `sub`).
-7. Sends a raw MIME email through SES v2 `SendEmail` from `SES_FROM_ADDRESS`, with the PDF attached.
-8. Writes the sent marker, then logs one JSON line `{"msg":"e-ticket sent","orderId",...,"occurredAt",...,"deliveryLatencyMs",...}`.
+5. Looks up the fan's email with Cognito `AdminGetUser` (`Username` = the event's `fanId`: the pool signs in by email,
+   so every username is the user's `sub`). A fan with no Cognito user gets `FALLBACK_RECIPIENT_EMAIL` if it is set.
+6. Sends a raw MIME email through SES v2 `SendEmail` from `SES_FROM_ADDRESS`, with the PDF attached.
+7. Writes the sent marker, then logs one JSON line `{"msg":"e-ticket sent","orderId",...,"occurredAt",...,"deliveryLatencyMs",...}`.
 
-A record that throws (bad JSON, invalid event, S3/Cognito/SES error) is logged with `level: "error"` and returned in
-`batchItemFailures`, so SQS redelivers only that record. After 5 receives (`max_receive_count`) it moves to
-`ticket-dlq`, which raises the `ticket-dlq-not-empty` alarm.
+`ConcertCancelled` follows the same marker → send → marker order without the PDF, and logs
+`{"msg":"cancellation notice sent",...}`. The API publishes one per confirmed order when a concert is cancelled
+([organiser README](../../services/ticketmastery-api/src/modules/organiser/README.md)), so each fan's email retries
+on its own.
+
+A record that throws (bad JSON, invalid event, S3/Cognito/SES error, no email for the fan) is logged with
+`level: "error"` and returned in `batchItemFailures`, so SQS redelivers only that record. After 5 receives
+(`max_receive_count`) it moves to `ticket-dlq`, which raises the `ticket-dlq-not-empty` alarm.
 
 ## Idempotency
 
@@ -67,13 +83,16 @@ filter msg = "e-ticket sent"
 | `TICKET_PDF_BUCKET` | e-ticket bucket created by the messaging module |
 | `SES_FROM_ADDRESS` | messaging variable `ses_from_address` |
 | `COGNITO_USER_POOL_ID` | messaging variable `cognito_user_pool_id` |
+| `FALLBACK_RECIPIENT_EMAIL` | optional, messaging variable `fallback_recipient_email` (root: `ticket_fallback_recipient_email`); testing only, a verified address for fans without a Cognito user (dev-header ids such as `fan-1`) |
 
-All three are required; the function fails at start-up without them. Region and credentials come from the runtime.
+The first three are required; the function fails at start-up without them. Region and credentials come from the
+runtime.
 
 IAM (role `<name>-ticket-fn`): `sqs:ReceiveMessage/DeleteMessage/GetQueueAttributes` on `ticket-queue`;
 `s3:GetObject/PutObject` on `tickets/*` and `s3:ListBucket` on the bucket (so a missing marker is a 404, not a 403);
-`ses:SendEmail` on `identity/*` with `ses:FromAddress` = the sender (the sandbox also authorises recipient
-identities); `cognito-idp:AdminGetUser` on the pool; `logs:CreateLogStream/PutLogEvents` on its log group.
+`ses:SendEmail` and `ses:SendRawEmail` on `identity/*` with `ses:FromAddress` = the sender (SES v2 authorises a raw
+MIME send as `SendRawEmail`, and the sandbox also authorises recipient identities); `cognito-idp:AdminGetUser` on the
+pool; `logs:CreateLogStream/PutLogEvents` on its log group.
 
 ## SES sandbox
 
