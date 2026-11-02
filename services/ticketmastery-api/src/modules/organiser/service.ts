@@ -268,23 +268,27 @@ export async function publishConcert(organiserId: string, concertId: string) {
 }
 
 /**
- * Allowed in any state except cancelled/completed, including after the layout locks. After the cancellation commits,
- * every confirmed order's fan is notified: one ConcertCancelled event per order to SNS `order-events`, which
- * ticket-fn turns into an email. Seats (including active holds) are left as-is; checkout refuses holds and confirms
- * on cancelled concerts.
+ * Allowed in any state except completed, including after the layout locks. After the cancellation commits, every
+ * confirmed order's fan is notified: one ConcertCancelled event per order to SNS `order-events`, which ticket-fn
+ * turns into an email. Seats (including active holds) are left as-is; checkout refuses holds and confirms on
+ * cancelled concerts.
+ *
+ * Cancelling an already cancelled concert changes nothing in the database and publishes the notices again, with the
+ * original reason and time. That is the retry for notices SNS didn't accept: ticket-fn skips fans it already emailed.
  */
 export async function cancelConcert(organiserId: string, concertId: string, reason: string) {
   const { concert, orders } = await withTransaction(async (tx) => {
     const current = await loadOwnedConcert(tx, organiserId, concertId, 'lock');
-    if (current.status === 'cancelled' || current.status === 'completed') {
-      throw new HttpError(409, 'invalid_status', `Concert is already ${current.status}`);
+    if (current.status === 'completed') {
+      throw new HttpError(409, 'invalid_status', 'Concert is already completed');
     }
     // Listed in the same transaction, so a confirm that commits first is included and one after it is refused.
-    const cancelled = await repo.cancelConcert(tx, concertId, reason);
+    const cancelled = current.status === 'cancelled' ? current : await repo.cancelConcert(tx, concertId, reason);
     return { concert: cancelled, orders: await repo.listConfirmedOrders(tx, concertId) };
   });
 
   const occurredAt = (concert.cancelled_at ?? new Date()).toISOString();
+  const noticeReason = concert.cancellation_reason ?? reason;
   const events: ConcertCancelledEvent[] = orders.map((o) => ({
     type: 'ConcertCancelled',
     version: 1,
@@ -298,7 +302,7 @@ export async function cancelConcert(organiserId: string, concertId: string, reas
       venueName: concert.venue_name,
       startsAt: concert.starts_at.toISOString(),
     },
-    reason,
+    reason: noticeReason,
     currency: o.currency,
     totalCents: o.total_cents,
   }));

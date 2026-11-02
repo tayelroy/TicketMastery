@@ -427,7 +427,8 @@ verified, which is why the Lambda's maximum concurrency is 2. Production access 
     and by database triggers.
   - A concert can be cancelled even after the lock. The confirmed orders are read in the cancelling transaction
     (the concert row lock waits for any in-flight checkout), and after the commit one `ConcertCancelled` per order
-    goes to SNS in batches of 10; `ticket-fn` emails each fan (Section 6.4).
+    goes to SNS in batches of 10; `ticket-fn` emails each fan (Section 6.4). If SNS rejects some, cancelling again
+    re-publishes to every order without changing the concert, and `ticket-fn` emails only the fans it missed.
 - **Live dashboard.** `GET …/concerts/:id/dashboard` returns available, held and sold counts and revenue per ticket
   type (`no-store`). The page polls it every 5 s.
 - **Reporting.** `0003_uc5_reporting_views.sql` adds five read-only views:

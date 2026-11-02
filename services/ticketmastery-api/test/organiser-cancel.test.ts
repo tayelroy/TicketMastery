@@ -111,19 +111,44 @@ describe('UC5 cancellation notices (Postgres)', { skip: process.env.DB_HOST ? fa
     );
   });
 
-  test('orders SNS did not accept are counted, and a second cancel is refused without publishing again', async (t) => {
+  test('cancelling again re-publishes every notice with the original reason and time', async (t) => {
     const { concert, seat } = await createOnSaleConcert();
     const a = await buy('fan-a', concert.id, [seat.A1!]);
-    await buy('fan-b', concert.id, [seat.A2!]);
+    const b = await buy('fan-b', concert.id, [seat.A2!]);
 
-    const publish = t.mock.method(events.organiserEvents, 'publishConcertCancelled', async () => ({
+    // First attempt: SNS rejects fan-a's notice, which is reported in the count.
+    const failing = t.mock.method(events.organiserEvents, 'publishConcertCancelled', async () => ({
       failedOrderIds: [a.orderId],
     }));
-    const result = await organiser.cancelConcert(ORGANISER, concert.id, 'Venue unavailable');
-    assert.deepEqual(result.cancellationNotices, { orders: 2, published: 1 });
+    const first = await organiser.cancelConcert(ORGANISER, concert.id, 'Venue unavailable');
+    assert.deepEqual(first.cancellationNotices, { orders: 2, published: 1 });
+    const firstEvents = failing.mock.calls[0]!.arguments[0]!;
+    failing.mock.restore();
 
-    await assert.rejects(organiser.cancelConcert(ORGANISER, concert.id, 'again'), { status: 409 });
-    assert.equal(publish.mock.callCount(), 1);
+    // Retry: same concert, nothing changes in the database, every order is published again.
+    const retry = t.mock.method(events.organiserEvents, 'publishConcertCancelled', async () => ({
+      failedOrderIds: [],
+    }));
+    const second = await organiser.cancelConcert(ORGANISER, concert.id, 'a different reason');
+    assert.equal(second.status, 'cancelled');
+    assert.deepEqual(second.cancelledAt, first.cancelledAt);
+    assert.equal(second.cancellationReason, 'Venue unavailable');
+    assert.deepEqual(second.cancellationNotices, { orders: 2, published: 2 });
+    const resent = retry.mock.calls[0]!.arguments[0]!;
+    assert.deepEqual(resent.map((e) => e.orderId).sort(), [a.orderId, b.orderId].sort());
+    // Same events as the first attempt, so ticket-fn's emails don't depend on which attempt reached the fan.
+    assert.deepEqual(resent, firstEvents);
+  });
+
+  test('a completed concert cannot be cancelled', async (t) => {
+    const { concert } = await createOnSaleConcert();
+    await db.query(`UPDATE concerts SET status = 'completed' WHERE id = $1`, [concert.id]);
+    const publish = t.mock.method(events.organiserEvents, 'publishConcertCancelled', async () => ({
+      failedOrderIds: [],
+    }));
+
+    await assert.rejects(organiser.cancelConcert(ORGANISER, concert.id, 'too late'), { status: 409 });
+    assert.equal(publish.mock.callCount(), 0);
   });
 
   test('a concert with no sales publishes nothing', async (t) => {
