@@ -17,7 +17,7 @@ Run them with `npm run migrate:dev` (local, tsx), `npm run migrate` (compiled, e
 NNNN_<uc-or-owner>_<description>.sql
 0001_uc5_concerts_ticket_types_seats.sql
 0002_uc4_orders.sql
-0003_uc2_user_profiles.sql
+0003_uc5_reporting_views.sql
 ```
 
 - `NNNN`: 4-digit sequence. Numbers are **not** reserved per person or per use case: take the next free
@@ -41,6 +41,7 @@ NNNN_<uc-or-owner>_<description>.sql
 |------|-------|--------|
 | `0001_uc5_concerts_ticket_types_seats.sql` | Elroy (UC5) | `concerts`, `ticket_types`, `sections`, `rows`, `seats`, view `concert_seat_counts`, layout-lock triggers |
 | `0002_uc4_orders.sql` | Shi Hui (UC4) | `orders`, `order_items`; adds FK `seats.order_id -> orders.id` and requires `order_id` on sold seats |
+| `0003_uc5_reporting_views.sql` | Elroy (UC5) | Read-only reporting views over UC5 + UC4 tables (`report_confirmed_orders`, `report_sales_by_concert`, `report_sales_by_ticket_type`, `report_sales_by_day`, `report_seat_status`; see `docs/reporting.md`). No table changes |
 
 Seat hold columns on `seats` (`status`, `held_by`, `hold_id`, `held_at`, `hold_expires_at`, `sold_at`,
 `order_id`) are the contract with UC4 (Shi Hui); the canonical hold/confirm/release/sweep statements and why

@@ -2,17 +2,22 @@
 
 **Owner:** Yan Ting
 **Mounted at:** `/api/waiting-room` (registered in `src/modules/index.ts`)
-**Status:** join and status implemented. The admit step (queue-manager Part B) is still to come.
+**Status:** join, status and admission implemented. queue-manager admits fans every minute (EventBridge Scheduler);
+checkout lets only admitted fans hold seats.
 
 ## Flow
 
 ```
 POST /join -> API (Fargate) -> SQS FIFO join-queue -> queue-manager Lambda -> DynamoDB live-queue
 GET /status -> API (Fargate) -> DynamoDB live-queue (GetItem)
+EventBridge Scheduler (every minute) -> queue-manager -> live-queue: next 500 WAITING -> ADMITTED (15 minutes)
+POST /api/checkout/holds -> checkout/admission.ts -> live-queue (GetItem): 403 not_admitted unless admitted
 ```
 
-The join message is `{ eventId, userId, joinedAt }` with `MessageGroupId = concertId`, so each concert's
-joins reach queue-manager in arrival order. `MessageDeduplicationId` is a hash of `userId#concertId`.
+The join message is `{ eventId, userId, joinedAt, saleStartsAt, saleEndsAt }` (epoch seconds) with
+`MessageGroupId = concertId`, so each concert's joins reach queue-manager in arrival order.
+`MessageDeduplicationId` is a hash of `userId#concertId`. queue-manager has no database access, so the sale window
+travels with the join and it admits nobody before the sale opens or after it ends.
 
 ## Endpoints
 
@@ -34,7 +39,7 @@ Both return the same body:
 ### `POST /api/waiting-room/:concertId/join`
 
 Sends the join to SQS. `202` with `state: "pending"`. A fan who is already waiting or admitted keeps their
-number: `200` with their current status, nothing is sent.
+number: `200` with their current status, nothing is sent. A fan whose admission expired joins again at the back.
 
 | Status | `error.code` | When |
 |---|---|---|
@@ -59,15 +64,18 @@ Set on the ECS task by `infra/envs/dev/main.tf` (`extra_environment`). Unset loc
 The task role gets `sqs:SendMessage` on join-queue and `dynamodb:GetItem` on live-queue
 (`infra/modules/waiting-room/iam.tf`). Tasks run in public subnets, so no VPC endpoint is needed.
 
-## Contract for the admit step (queue-manager Part B)
+## live-queue data model
 
-The API already reads these; the admit step must write them:
+Written by [queue-manager](../../../../../lambdas/queue-manager/README.md#live-queue-data-model), read here
+(`queue.ts`, mapped by `status.ts`):
 
-- `#COUNTER` row: `admittedUpTo` (number), the highest position let in so far.
-- Fan row: `status = "ADMITTED"` and `admissionExpiresAt` (epoch seconds), or `status = "EXPIRED"`.
+- `#COUNTER` row: `lastPosition`, `admittedUpTo` (the highest position let in so far).
+- Fan row: `position`, `status = "WAITING"`, then `status = "ADMITTED"` with `admissionExpiresAt` (epoch seconds).
+  `ADMITTED` past `admissionExpiresAt` (or `EXPIRED`) shows as `expired`.
+
+Checkout's admission check (`checkout/admission.ts`) uses the same mapping, so a fan the status says is `admitted`
+can hold seats, and nobody else can.
 
 ## Known gaps
 
-- Rejoining after `expired` sends a new message, but queue-manager skips fans who already have a row, so
-  they keep the old one. Part B should delete or reset the row on expiry.
-- `checkout/admission.ts` (Shi Hui) still admits everyone; it can call `getStatus` once Part B exists.
+- `peopleAhead` counts unused numbers (rare join races) and fans who left, so it can overstate the wait slightly.

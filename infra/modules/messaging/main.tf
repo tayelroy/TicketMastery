@@ -1,5 +1,5 @@
 # UC4 e-ticket pipeline (Shi Hui):
-#   API --publish--> SNS order-events --> SQS ticket-queue --> ticket-fn Lambda (later PR)
+#   API --publish--> SNS order-events --> SQS ticket-queue --> ticket-fn Lambda (ticket_fn.tf) --> S3 PDF + SES email
 #                                              |
 #                                              +-- after max_receive_count failures --> SQS ticket-dlq
 # The API publishes OrderConfirmed (UC4) and, later, ConcertCancelled (UC5) to the same topic.
@@ -120,8 +120,8 @@ resource "aws_iam_role_policy" "api_publish" {
 # Alarm
 ################################################################################
 
-# Anything in the DLQ is an e-ticket that was never sent. No alarm action yet: it shows as "In alarm" in the
-# CloudWatch console. Add an SNS email action here if the team wants notifications.
+# Anything in the DLQ is an e-ticket that was never sent. alarm_actions (the monitoring module's alerts topic) gets
+# both the ALARM and the OK transition, so whoever re-drives the messages also sees it clear.
 resource "aws_cloudwatch_metric_alarm" "ticket_dlq_not_empty" {
   alarm_name          = "${var.name}-ticket-dlq-not-empty"
   alarm_description   = "E-tickets failed ${var.max_receive_count} times and are waiting in ${aws_sqs_queue.ticket_dlq.name}."
@@ -134,6 +134,9 @@ resource "aws_cloudwatch_metric_alarm" "ticket_dlq_not_empty" {
   comparison_operator = "GreaterThanThreshold"
   threshold           = 0
   treat_missing_data  = "notBreaching"
+
+  alarm_actions = var.alarm_actions
+  ok_actions    = var.alarm_actions
 
   tags = var.tags
 }

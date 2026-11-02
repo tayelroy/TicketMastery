@@ -72,3 +72,13 @@ output "execution_role_arn" {
   description = "ECS task execution role ARN."
   value       = aws_iam_role.execution.arn
 }
+
+output "alb_arn_suffix" {
+  description = "ALB ARN suffix (app/<name>/<id>), the LoadBalancer dimension of its CloudWatch metrics."
+  value       = aws_lb.this.arn_suffix
+}
+
+output "target_group_arn_suffix" {
+  description = "API target group ARN suffix (targetgroup/<name>/<id>), the TargetGroup dimension of its CloudWatch metrics."
+  value       = aws_lb_target_group.api.arn_suffix
+}

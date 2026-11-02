@@ -1,0 +1,49 @@
+sequenceDiagram
+  autonumber
+  actor Fan
+  participant CF as CloudFront + WAF
+  participant GW as API Gateway (JWT)
+  participant API as Fargate API
+  participant Q as SQS FIFO join-queue
+  participant QM as queue-manager (Scheduler, 1 min)
+  participant D as DynamoDB live-queue
+  participant DB as RDS PostgreSQL
+  participant T as SNS order-events -> SQS ticket-queue
+  participant TF as ticket-fn
+  participant S3 as S3 tickets/
+  participant SES as SES
+
+  Fan->>CF: POST /api/waiting-room/{concert}/join
+  CF->>GW: forward (no cache)
+  GW->>API: verified access token
+  API->>Q: SendMessage (group = concertId, dedup = user#concert)
+  API-->>Fan: 202 pending
+  QM->>Q: receive joins in arrival order
+  QM->>D: assign position (WAITING)
+  loop every few seconds
+    Fan->>API: GET /status
+    API->>D: GetItem
+    API-->>Fan: waiting, peopleAhead
+  end
+  QM->>D: admit next 500 per concert (ADMITTED, 15-min expiry)
+  Fan->>API: POST /api/checkout/holds (seatIds)
+  API->>D: isAdmitted?
+  alt not admitted
+    API-->>Fan: 403 not_admitted
+  else admitted
+    API->>DB: one transaction: UPDATE seats (available or expired hold), insert pending order
+    alt every seat updated
+      API-->>Fan: hold created, expires in 10 min
+    else any seat taken
+      API-->>Fan: 409 seats_unavailable (nothing held)
+    end
+  end
+  Fan->>API: POST /holds/{id}/confirm (simulated payment)
+  API->>DB: seats held -> sold, order confirmed (one transaction)
+  API->>T: publish OrderConfirmed
+  API-->>Fan: 200 confirmed
+  T->>TF: SQS batch (partial batch failures, DLQ after 5)
+  TF->>S3: PutObject tickets/{orderId}.pdf (If-None-Match *)
+  TF->>SES: send e-ticket email
+  Fan->>API: GET /api/me/tickets/{id}/download
+  API-->>Fan: pre-signed S3 URL (300 s)

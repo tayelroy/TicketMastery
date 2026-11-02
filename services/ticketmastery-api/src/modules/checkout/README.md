@@ -40,7 +40,7 @@ time). `201`:
 | 400 | `validation_error` | bad body (1–20 unique seat uuids) |
 | 400 | `unknown_seats` | a seat isn't in this concert (`details.seatIds`) |
 | 400 | `too_many_seats` | more than the ticket type's `max_per_order` |
-| 403 | `not_admitted` | not admitted from the waiting room (always admitted until UC3 exists) |
+| 403 | `not_admitted` | not admitted from the waiting room, or the 15-minute admission ran out (see [Waiting-room admission](#waiting-room-admission)); the page sends the fan to the waiting room |
 | 404 | `not_found` | no such concert |
 | 409 | `not_on_sale` | concert not `scheduled`/`on_sale`, or outside its sale window |
 | 409 | `active_hold_exists` | the fan already has an unexpired hold for this concert (`details.holdId`) |
@@ -109,10 +109,25 @@ event is only logged and `published_at` stays `NULL`.
 - Sellable when the concert is `scheduled` or `on_sale` **and** inside its sale window. Nothing sets
   `on_sale` yet, so a published concert counts as on sale during its window. Cancelled concerts never sell.
 - Seat status changes only go through `src/db/seat-holds.ts`.
-- Waiting-room admission is checked through `admission.ts`, a placeholder that admits everyone until UC3's
-  DynamoDB `live-queue` starts admitting fans (the table exists; the admit step is still to come).
+- Waiting-room admission is checked by `admission.ts` before a hold is created (below).
+
+## Waiting-room admission
+
+`POST /holds` first calls `isAdmitted(fanId, concertId)`, which reads the fan's row in DynamoDB `live-queue`
+(GetItem, key `eventId` = concertId, `userId` = fanId). The fan is admitted only if the row's `status` is `ADMITTED`
+and `admissionExpiresAt` hasn't passed. queue-manager's scheduled admit step writes those (500 fans per concert per
+minute, 15 minutes each); the decision uses the waiting room's own `toQueueStatus`, so it always agrees with
+`GET /api/waiting-room/:id/status`. Otherwise `403 not_admitted`, and the frontend redirects to
+`/concerts/:id/waiting-room`.
+
+- Only creating a hold is gated. A fan admitted at 14:59 who holds seats keeps the hold's own 10 minutes to pay.
+- `WAITING_ROOM_TABLE_NAME` unset (local dev, `test/checkout.test.ts`): the waiting room is off and every fan is
+  admitted, the same "unset AWS setting = feature off" rule as the SNS publisher.
+- A DynamoDB error fails the request (500); it is never treated as admitted.
+- IAM: the API task role's `dynamodb:GetItem` on `live-queue` (`waiting-room-api-access`, `infra/modules/waiting-room/iam.tf`).
 
 ## Layout
 
 `router.ts` (HTTP + zod parsing), `service.ts` (rules, transactions), `repository.ts` (SQL), `schemas.ts`
-(zod), `admission.ts` (UC3 hook), `events.ts` (SNS publisher). Tests: `test/checkout.test.ts`.
+(zod), `admission.ts` (UC3 admission check), `events.ts` (SNS publisher). Tests: `test/checkout.test.ts`,
+`test/checkout-admission.test.ts` (admission with DynamoDB mocked).

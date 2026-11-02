@@ -215,3 +215,27 @@ output "ticket_dlq_url" {
   description = "SQS ticket-dlq URL; e-tickets that failed 5 times wait here for inspection."
   value       = module.messaging.ticket_dlq_url
 }
+
+output "ticket_pdf_bucket_name" {
+  description = "Private S3 bucket with the e-ticket PDFs (tickets/<orderId>.pdf)."
+  value       = module.messaging.ticket_pdf_bucket_name
+}
+
+output "ticket_fn_function_name" {
+  description = "ticket-fn Lambda (renders and emails e-tickets)."
+  value       = module.messaging.ticket_fn_function_name
+}
+
+################################################################################
+# Monitoring
+################################################################################
+
+output "alerts_topic_arn" {
+  description = "SNS topic every CloudWatch alarm notifies (email subscription to contact_email)."
+  value       = module.monitoring.alerts_topic_arn
+}
+
+output "monitoring_dashboard_url" {
+  description = "CloudWatch dashboard with every monitored signal."
+  value       = module.monitoring.dashboard_url
+}

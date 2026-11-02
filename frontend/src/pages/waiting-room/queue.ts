@@ -3,8 +3,8 @@ import type { QueueStatus } from './types';
 
 /** Fans the queue-manager admits per minute (EventBridge Scheduler batch). */
 export const ADMIT_PER_MINUTE = 500;
-/** How long an admitted fan has to start checkout. */
-export const ADMISSION_WINDOW_MS = 10 * 60_000;
+/** How long an admitted fan has to hold seats (queue-manager's ADMISSION_WINDOW_SECONDS). */
+export const ADMISSION_WINDOW_MS = 15 * 60_000;
 
 export interface QueueClient {
   /** 'demo' while the API still returns 501 not_implemented. */

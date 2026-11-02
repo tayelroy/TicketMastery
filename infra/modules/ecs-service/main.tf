@@ -130,6 +130,10 @@ resource "aws_ecs_service" "api" {
   launch_type      = "FARGATE"
   platform_version = "LATEST"
 
+  # ECS Exec (aws ecs execute-command) for one-off checks inside the running task, e.g. the oversell SQL check
+  # against RDS, which is only reachable from inside the VPC. Takes effect on tasks started after the change.
+  enable_execute_command = var.enable_execute_command
+
   network_configuration {
     subnets          = local.task_subnet_ids
     security_groups  = [var.ecs_sg_id]

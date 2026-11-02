@@ -1,0 +1,5 @@
+# Run outputs stay local; copy the numbers you need into docs/report.
+results/*
+!results/README.md
+# state/ (tokens, password) is ignored by the root .gitignore; keep the folder.
+!state/.gitkeep

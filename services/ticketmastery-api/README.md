@@ -1,10 +1,12 @@
 # ticketmastery-api
 
 The single backend service for TicketMastery: Node 20 + Express 4 + TypeScript, `pg` (no ORM), `zod`,
-`pino`. Runs on ECS Fargate (private subnets, 2 AZs) behind API Gateway -> ALB, talking to RDS PostgreSQL.
+`pino`. Runs on ECS Fargate behind API Gateway -> VPC link -> internal ALB, talking to RDS PostgreSQL (one task in
+a public subnet of AZ a in implementation mode; private subnets in 2 AZs in the HA design, see
+[`docs/architecture.md`](../../docs/architecture.md#implementation-vs-target-ha-design)).
 
-UC5 (organiser concert & ticket management) is implemented; UC4 checkout (hold, release, confirm) is implemented;
-UC1–UC3 modules are registered stubs that return `501` until their owners fill them in.
+All five use-case modules are implemented: UC1 discovery, UC2 My Tickets, UC3 waiting room, UC4 checkout and UC5
+organiser management (see [Routes and modules](#routes-and-modules)).
 
 ## Run locally
 
@@ -108,13 +110,13 @@ conflict -> 409.
 
 | Path | Module | Use case | Owner | Status |
 |---|---|---|---|---|
-| `/api/concerts` | `discovery` | UC1 Concert discovery | Cody & Nai Xin | stub (501) |
-| `/api/me` | `account` | UC2 My Tickets & Account | Andrew | implemented (profile, orders, e-ticket download link) |
-| `/api/waiting-room` | `waiting-room` | UC3 Virtual waiting room | Yan Ting | stub (501) |
-| `/api/checkout` | `checkout` | UC4 Seat selection & checkout | Shi Hui | implemented (hold, release, confirm) |
+| `/api/concerts` | `discovery` | UC1 Concert discovery | Cody & Nai Xin | implemented (list with search/filter, detail, seat map; public) |
+| `/api/me` | `account` | UC2 My Tickets & Account | Andrew | implemented (profile, orders, one ticket, e-ticket download link) |
+| `/api/waiting-room` | `waiting-room` | UC3 Virtual waiting room | Yan Ting | implemented (join, status); `501` when its env vars are unset |
+| `/api/checkout` | `checkout` | UC4 Seat selection & checkout | Shi Hui | implemented (seat map, hold, release, confirm; `403 not_admitted` until the waiting room admits the fan) |
 | `/api/organiser` | `organiser` | UC5 Concert & ticket management | Elroy | implemented |
 
-Each module has a `README.md` with its planned endpoints.
+Each module has a `README.md` with its endpoints.
 
 ### Adding a route or module
 
@@ -136,7 +138,9 @@ migration. Details: [`migrations/README.md`](migrations/README.md).
 
 ## Configuration
 
-Validated with zod at startup (`src/config.ts`); invalid config exits with a list of problems.
+Validated with zod at startup (`src/config.ts`); invalid config exits with a list of problems. The last four rows
+are optional AWS resource names that the modules read directly; when one is unset, that feature degrades as noted
+instead of stopping start-up.
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -154,6 +158,8 @@ Validated with zod at startup (`src/config.ts`); invalid config exits with a lis
 | `RUN_MIGRATIONS_ON_START` | `false` | migrate (advisory-locked) before listening |
 | `ORDER_EVENTS_TOPIC_ARN` | unset | UC4: SNS `order-events` topic for `OrderConfirmed`; unset = event only logged |
 | `TICKET_PDF_BUCKET` | unset | UC2: private S3 bucket with the e-ticket PDFs (UC4's; the API needs `s3:GetObject` + `s3:ListBucket`); unset = downloads answer `503` |
+| `WAITING_ROOM_JOIN_QUEUE_URL` | unset | UC3: SQS FIFO `join-queue` for `POST /api/waiting-room/:id/join` (`sqs:SendMessage`); unset = both waiting-room routes answer `501` |
+| `WAITING_ROOM_TABLE_NAME` | unset | UC3: DynamoDB `live-queue` for the status route and checkout's admission check (`dynamodb:GetItem`); unset = waiting-room routes answer `501` and checkout admits every fan |
 
 ### AWS notes
 

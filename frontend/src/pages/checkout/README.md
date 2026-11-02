@@ -23,6 +23,13 @@
   message. Clicks within 20 seconds of the last refresh don't refresh again, so picking several seats stays quick.
 - Checkout still checks every seat on the server (`seats_unavailable`), which covers anything taken inside the window.
 
+## Waiting room
+
+Holding seats needs a current admission from the waiting room (UC3). When `POST /api/checkout/holds` answers
+`403 not_admitted` (the fan hasn't been admitted, or their 15 minutes ran out), the page navigates to
+`/concerts/:concertId/waiting-room`, which joins the queue or shows the fan's place and links back here once they're
+in. Locally, without `WAITING_ROOM_TABLE_NAME`, the API admits everyone, so this never happens.
+
 ## Files
 
 - `CheckoutPage.tsx`: the page in three steps: Select seats → Checkout (10-minute reservation timer, itemised order summary, simulated payment; "Change seats" releases them) → Confirmation. The API calls the reservation a "hold". When the 10 minutes run out, the page releases the reservation, shows the seat map again and opens a "Reservation timed out" popup that the fan closes themselves (`TimeoutDialog`).

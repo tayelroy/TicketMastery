@@ -1,0 +1,37 @@
+{
+  "test": "nfr1-browse",
+  "startedAt": "2026-11-01T02:57:04.905Z",
+  "finishedAt": "2026-11-01T03:02:04.988Z",
+  "baseUrl": "https://veft7waoye.execute-api.ap-southeast-1.amazonaws.com",
+  "auth": "cognito",
+  "rateRps": 10,
+  "duration": "5m",
+  "concertId": "16e33f9e-ee2f-4e64-8e37-410b644dbf5b",
+  "requests": 3000,
+  "achievedRps": 10,
+  "errorRate": 0,
+  "waf403": 0,
+  "p50Ms": 11,
+  "p95Ms": 30.3,
+  "p99Ms": 43.3,
+  "maxMs": 339.4,
+  "endpoints": {
+    "GET /api/concerts": {
+      "count": 900,
+      "p95Ms": 13.8,
+      "p99Ms": 23.6
+    },
+    "GET /api/concerts/:id": {
+      "count": 1195,
+      "p95Ms": 14.7,
+      "p99Ms": 31.5
+    },
+    "GET /api/concerts/:id/seats": {
+      "count": 905,
+      "p95Ms": 35.3,
+      "p99Ms": 52.9
+    }
+  },
+  "wafWarning": null,
+  "pass": true
+}

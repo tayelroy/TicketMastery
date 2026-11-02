@@ -35,14 +35,14 @@ On high-demand sales, fans join a FIFO queue and receive a live queue number (fi
 Fans pick seats on the seat map; seats are held for 10 minutes in an all-or-nothing RDS transaction. Simulated payment on success confirms the order, marks seats SOLD, and triggers e-ticket generation. Expired/failed holds release seats back to the pool.
 
 ### 5. Organiser Management
-Organisers (verified via a Cognito group) create and manage concerts, ticket types, and seat layouts. A dashboard refreshes every 5s with live sold/held/available counts and revenue, backed by QuickSight reporting.
+Organisers (verified via a Cognito group) create and manage concerts, ticket types, and seat layouts. A dashboard refreshes every 5s with live sold/held/available counts and revenue. Sales reporting views in RDS feed internal reports; a QuickSight dashboard on them is designed but not deployed (per-user pricing).
 
 ## Architecture
 
 Designed for the **ap-southeast-1 (Singapore)** region across two Availability Zones. The sections below describe that **target (HA) design**. The deployed build is a single-AZ implementation of it; see [Implementation vs target (HA) design](#implementation-vs-target-ha-design).
 
 **Edge & routing**
-- Route 53 (DNS) → CloudFront + WAF (edge cache, bot filtering) → API Gateway
+- Route 53 (DNS, target design; the deployed build uses the CloudFront domain) → CloudFront + WAF (edge cache, bot filtering) → API Gateway HTTP API (Cognito JWT authorizer) → VPC link → internal ALB
 
 **Compute**
 - ECS Fargate service `ticketmastery-api` behind an Application Load Balancer. This single service hosts the API routes for all five use cases (UC1–UC5) under `/api/...`, one module per use case. In the target design it runs in private subnets across AZ A & AZ B, auto-scales on CPU and request count, and failed tasks are replaced automatically.
@@ -52,15 +52,15 @@ Designed for the **ap-southeast-1 (Singapore)** region across two Availability Z
 
 **Serverless & messaging**
 - SQS FIFO (`join-queue`) + Lambda (`queue-manager`) for the waiting room
-- DynamoDB for live queue state and admission tokens
-- SNS → SQS → Lambda (`ticket-fn`) → SES for e-ticket delivery (with a dead-letter queue so no order is lost)
-- EventBridge Scheduler to admit batches and release expired holds
+- DynamoDB for live queue numbers and admissions
+- SNS → SQS → Lambda (`ticket-fn`) → S3 + SES for e-ticket delivery (with a dead-letter queue so no order is lost)
+- EventBridge Scheduler runs `queue-manager` every minute to admit the next batch of fans (expired seat holds need no job: checkout reclaims them atomically)
 - S3 for site files and e-ticket PDFs
 
 **Auth, security & monitoring**
 - Amazon Cognito (JWT auth, user pools, organiser groups)
-- `X-Origin-Verify` secret header between API Gateway and the ALB
-- IAM, KMS, CloudTrail, CloudWatch, AWS Budgets
+- API Gateway reaches the ALB only through a VPC link; the ALB is internal, with no public entry
+- IAM least-privilege roles per service, encryption at rest (RDS, S3, SQS), CloudWatch alarms + dashboard with email alerts through SNS, AWS Budgets
 
 ## Implementation vs target (HA) design
 
@@ -69,27 +69,28 @@ At the proposal feedback (Oct 2026) the instructor told us to skip the NAT gatew
 | | Implementation (deployed by default) | Target HA (diagram + report) |
 |---|---|---|
 | Compute | 1 Fargate task in the AZ a public subnet with a public IP (inbound only from the ALB), no NAT gateway, autoscaling off | Tasks in private subnets across 2 AZs, NAT gateway per AZ (or VPC endpoints), autoscaling on CPU and request count |
-| Database | RDS single-AZ, pinned to AZ a. An AZ a outage means downtime until AWS recovers or we restore elsewhere; RTO is TBC | RDS Multi-AZ, automatic failover |
+| Database | RDS single-AZ, pinned to AZ a. An AZ a outage means downtime until AWS recovers or we restore elsewhere; a timed point-in-time restore took 9 min until the restored DB accepted connections (RPO 3 min) | RDS Multi-AZ, automatic failover |
 | Serverless | SQS/SNS/Lambda/S3/SES are Multi-AZ by default; SQS retries then routes to a DLQ | Same |
-| Cost (estimate) | ≈ USD 69/month | ≈ USD 190/month |
+| Cost (estimate, whole stack) | ≈ USD 72/month | ≈ USD 194/month |
 
 Details, the variables to flip, and why two subnets of each kind still exist: [docs/architecture.md](docs/architecture.md#implementation-vs-target-ha-design).
 
 ## Tech Stack
 
-AWS (ECS Fargate, RDS PostgreSQL, DynamoDB, Lambda, SQS, SNS, SES, S3, Cognito, CloudFront, API Gateway, Route 53, WAF, EventBridge, QuickSight, CloudWatch, KMS, IAM)
+AWS (ECS Fargate, RDS PostgreSQL, DynamoDB, Lambda, SQS, SNS, SES, S3, Cognito, CloudFront, API Gateway, WAF, EventBridge Scheduler, CloudWatch, AWS Budgets, IAM); Terraform; Node.js + TypeScript (API, `ticket-fn`), Python (`queue-manager`), React + Vite (frontend). Designed but not deployed: Route 53, QuickSight, KMS customer-managed keys.
 
 ## Repository layout
 
 ```
 .
-├── infra/                      Terraform: envs/dev root + modules (network, security, ecr, rds, ecs-service, + teammates' modules)
+├── infra/                      Terraform: envs/dev root + modules (network, security, ecr, rds, ecs-service, edge, github-deploy, auth-apigw, waiting-room, messaging, monitoring)
 ├── services/
 │   └── ticketmastery-api/      Node 20 + Express + TypeScript API (ECS Fargate); modules per use case, SQL migrations
-├── frontend/                   static SPA (S3 + CloudFront); placeholder
-├── lambdas/                    queue-manager (UC3), ticket-fn (UC4); placeholders
-├── docs/                       architecture, deploy guide, cost estimate
-├── .github/                    CODEOWNERS, PR template
+├── frontend/                   React SPA (S3 + CloudFront), one page folder per use case
+├── lambdas/                    queue-manager (UC3, Python), ticket-fn (UC4, Node.js)
+├── loadtest/                   k6 scripts and drills that produce the NFR evidence
+├── docs/                       architecture, deploy guide, cost estimate, reporting, final report (docs/report/)
+├── .github/                    CODEOWNERS, PR template, frontend CI + deploy workflows
 └── CONTRIBUTING.md             workflow, ownership, how to add routes / tables / Terraform
 ```
 
@@ -104,7 +105,7 @@ curl http://localhost:3000/health
 ```
 
 - [CONTRIBUTING.md](CONTRIBUTING.md): branches, reviews, ownership, adding routes, tables, and Terraform, secrets rules
-- [docs/architecture.md](docs/architecture.md): current design, diagram, decisions, open questions
+- [docs/architecture.md](docs/architecture.md): current design, diagram, decisions, instructor feedback
 - [docs/deploy.md](docs/deploy.md): deploying and tearing down the AWS dev stack
 - [docs/cost-estimate.md](docs/cost-estimate.md): what the dev stack costs per month
 - [infra/README.md](infra/README.md): Terraform modules, inputs, and outputs

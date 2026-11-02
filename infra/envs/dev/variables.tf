@@ -160,6 +160,12 @@ variable "container_insights" {
   default     = "disabled"
 }
 
+variable "enable_execute_command" {
+  description = "ECS Exec into the API task (team admins only, via IAM). Used for checks against RDS from inside the VPC."
+  type        = bool
+  default     = true
+}
+
 variable "log_retention_days" {
   description = "API log retention (days)."
   type        = number
@@ -255,4 +261,34 @@ variable "waiting_room_public" {
   description = "true lets guests (no token) call /api/waiting-room; false (default) requires sign-in."
   type        = bool
   default     = false
+}
+
+variable "admit_schedule_enabled" {
+  description = "UC3: run the queue-manager admit step every minute (EventBridge Scheduler)."
+  type        = bool
+  default     = true
+}
+
+variable "admit_schedule_start_date" {
+  description = "UC3: optional RFC 3339 start of the admit schedule, to limit it to a sale window (null = no limit)."
+  type        = string
+  default     = null
+}
+
+variable "admit_schedule_end_date" {
+  description = "UC3: optional RFC 3339 end of the admit schedule (null = no limit)."
+  type        = string
+  default     = null
+}
+
+variable "admit_batch_size" {
+  description = "UC3: fans admitted per concert per admit run (once a minute)."
+  type        = number
+  default     = 500
+}
+
+variable "contact_email" {
+  description = "Team contact: SES sender of the e-ticket emails (must be verified), alert emails and AWS Budgets notifications."
+  type        = string
+  default     = "tayelroy@gmail.com"
 }
