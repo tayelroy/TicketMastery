@@ -344,8 +344,9 @@ Take these during the dress rehearsal and save them to `docs/report/evidence/dem
    "Reason", e.g. `Demo finished`, then click **"Cancel concert"** ("Keep it" closes the panel).
 4. The status becomes "Cancelled" with the banner "Cancelled: Demo finished". The concert leaves the public list;
    its public page shows "This concert has been cancelled: Demo finished". Fans who bought keep their order: My
-   Tickets shows a "Concert cancelled" badge and the ticket page "This concert has been cancelled." No email is sent
-   (cancellation emails are not built).
+   Tickets shows a "Concert cancelled" badge and the ticket page "This concert has been cancelled." Within seconds
+   each ticket holder gets the email "Cancelled: <concert title>" with the reason and the refund amount (only to
+   SES-verified addresses while SES is in the sandbox).
 
 ### After the final presentation
 

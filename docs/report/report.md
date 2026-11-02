@@ -113,7 +113,7 @@ Each is one API module and one frontend folder, with one owner:
 | UC2 | My Tickets & Account | Andrew | FR-3 sign up, sign in and sign out with Cognito (email verification). FR-4 list the fan's confirmed orders, open an e-ticket, download its PDF through a short-lived link |
 | UC3 | Virtual waiting room | Yan Ting | FR-5 join, see the queue position, be admitted in arrival order in batches. FR-6 only admitted fans may hold seats; admission lasts 15 minutes |
 | UC4 | Seat selection & checkout | Shi Hui | FR-7 hold 1–20 seats for 10 minutes, all or nothing, one active hold per fan per concert. FR-8 simulated payment: success sells the seats, failure or timeout releases them. FR-9 email the e-ticket PDF after payment |
-| UC5 | Concert & ticket management | Elroy | FR-10 create, edit, publish and cancel concerts; ticket types and seat layout, locked once the sale opens. FR-11 live available, held and sold counts and revenue. FR-12 sales reporting for a BI tool |
+| UC5 | Concert & ticket management | Elroy | FR-10 create, edit, publish and cancel concerts; ticket types and seat layout, locked once the sale opens; cancelling emails every ticket holder. FR-11 live available, held and sold counts and revenue. FR-12 sales reporting for a BI tool |
 
 The six system use cases (autoscaling, flash-sale queue, monitoring, caching, load balancing, failure handling) are
 covered in Sections 7 and 8. Payment is simulated: the proposal scoped real payment as design-only.
@@ -271,7 +271,7 @@ Alternatives we rejected:
 |---|---|---|
 | API → SQS FIFO `join-queue` → `queue-manager` | `{ eventId, userId, joinedAt, saleStartsAt, saleEndsAt }`. Group = concert; dedup ID = hash of `userId#concertId` | In order per concert; duplicates dropped. If a record fails, it and every record after it are retried, so nobody overtakes. DLQ after 3 tries (alarmed) |
 | EventBridge Scheduler → `queue-manager` | Scheduled admit run every minute | Async, retries off (the next run is a minute away). Admits are conditional on `status = WAITING`, so overlapping runs never admit anyone twice |
-| API → SNS `order-events` → SQS `ticket-queue` → `ticket-fn` | `OrderConfirmed` v1 (attribute `eventType`; other types are skipped) | At-least-once delivery. Partial batch failures; DLQ after 5 (alarmed); `tickets/<orderId>.sent` marker so redeliveries do nothing |
+| API → SNS `order-events` → SQS `ticket-queue` → `ticket-fn` | `OrderConfirmed` v1 from checkout; `ConcertCancelled` v1 from the organiser module, one per confirmed order (attribute `eventType`; other types are skipped) | At-least-once delivery. Partial batch failures; DLQ after 5 (alarmed); `.sent` / `.cancelled.sent` markers so redeliveries send nothing twice |
 | `queue-manager`, `ticket-fn` → CloudWatch Logs (EMF) | `TicketMastery/WaitingRoomSize`, `TicketMastery/ETicketDeliveryLatency` | Metrics without API calls; used by alarms and the dashboard |
 | Alarms, Budgets → SNS `alerts` / email | ALARM and OK transitions | Section 8 |
 
@@ -382,7 +382,7 @@ together. In one database that is a local transaction; across two stores it woul
 ## 6.4 UC4/UC2: e-ticket pipeline
 
 `ticket-fn` (Node.js 22, arm64, outside the VPC, 256 MB, 60 s) takes up to 10 SQS records per invocation and reports
-partial batch failures, so only failed records are retried. For each `OrderConfirmed` it:
+partial batch failures, so only failed records are retried. It handles two events. For each `OrderConfirmed` it:
 
 1. **checks the marker:** stops if `tickets/<orderId>.sent` already exists;
 2. **renders the PDF** (pdf-lib): concert, venue, start time in Singapore time, order ID with a QR code, one line per
@@ -410,6 +410,10 @@ orders already sent are skipped. In UC2, `GET /api/me/tickets/:id/download` firs
   error page;
 - **PDF present:** a 300 s pre-signed URL that downloads as an attachment.
 
+**Cancellation notices.** For each `ConcertCancelled` the same function sends a plain-text email with the reason and
+the refund amount, guarded by its own marker (`tickets/<orderId>.cancelled.sent`). The event contract and this
+handling come from Shi Hui's parallel implementation (PR #20), merged into the deployed function.
+
 **SES sandbox.** SES is in the sandbox (200 emails per 24 h, 1 per second). The sender and every recipient must be
 verified, which is why the Lambda's maximum concurrency is 2. Production access is a go-live step (Section 12).
 
@@ -421,7 +425,9 @@ verified, which is why the Lambda's maximum concurrency is 2. Production access 
   - Publishing needs ticket types and a matching layout.
   - Once the sale opens the layout locks, enforced both in the service (`SELECT … FOR UPDATE`, `409 layout_locked`)
     and by database triggers.
-  - A concert can be cancelled even after the lock.
+  - A concert can be cancelled even after the lock. The confirmed orders are read in the cancelling transaction
+    (the concert row lock waits for any in-flight checkout), and after the commit one `ConcertCancelled` per order
+    goes to SNS in batches of 10; `ticket-fn` emails each fan (Section 6.4).
 - **Live dashboard.** `GET …/concerts/:id/dashboard` returns available, held and sold counts and revenue per ticket
   type (`no-store`). The page polls it every 5 s.
 - **Reporting.** `0003_uc5_reporting_views.sql` adds five read-only views:
