@@ -287,6 +287,12 @@ variable "admit_batch_size" {
   default     = 500
 }
 
+variable "ticket_fallback_recipient_email" {
+  description = "Testing only: verified SES address that ticket-fn emails when a fan has no Cognito user (dev-header ids). Empty = off."
+  type        = string
+  default     = ""
+}
+
 variable "contact_email" {
   description = "Team contact: SES sender of the e-ticket emails (must be verified), alert emails and AWS Budgets notifications."
   type        = string

@@ -20,4 +20,5 @@ export const handler = createHandler({
   bucket: requiredEnv('TICKET_PDF_BUCKET'),
   fromAddress: requiredEnv('SES_FROM_ADDRESS'),
   userPoolId: requiredEnv('COGNITO_USER_POOL_ID'),
+  fallbackRecipient: process.env.FALLBACK_RECIPIENT_EMAIL?.trim() || undefined,
 });

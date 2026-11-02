@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
-import { AdminGetUserCommand } from '@aws-sdk/client-cognito-identity-provider';
+import { AdminGetUserCommand, UserNotFoundException } from '@aws-sdk/client-cognito-identity-provider';
 import { HeadObjectCommand, NotFound, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SendEmailCommand } from '@aws-sdk/client-sesv2';
 import type { SQSEvent, SQSRecord } from 'aws-lambda';
-import { createHandler, type Deps, sentMarkerKey, ticketPdfKey } from '../src/handler.js';
+import { cancelledMarkerKey, createHandler, type Deps, sentMarkerKey, ticketPdfKey } from '../src/handler.js';
 
 const ORDER_ID = '0b6f5c1e-8a7d-4f53-9a51-2f7b1f0c9e11';
 const FAN_ID = '5a1b2c3d-0000-4000-8000-123456789abc';
@@ -34,6 +34,25 @@ const orderConfirmed = {
   totalCents: 50400,
 };
 
+const concertCancelled = {
+  type: 'ConcertCancelled',
+  version: 1,
+  occurredAt: '2026-11-04T02:00:00.000Z',
+  orderId: ORDER_ID,
+  fanId: FAN_ID,
+  concert: orderConfirmed.concert,
+  reason: 'Artist unwell',
+  currency: 'SGD',
+  totalCents: 50400,
+};
+
+/** The text part of a raw email, decoded. */
+function mimeText(raw: Uint8Array): string {
+  const mime = Buffer.from(raw).toString('utf8');
+  const part = mime.split('Content-Transfer-Encoding: base64\r\n\r\n')[1]!.split('\r\n\r\n')[0]!;
+  return Buffer.from(part.replace(/\r\n/g, ''), 'base64').toString('utf8');
+}
+
 function record(messageId: string, body: unknown, eventType?: string): SQSRecord {
   return {
     messageId,
@@ -60,7 +79,7 @@ function fakeAws() {
   const objects = new Map<string, { body: unknown; contentType?: string }>();
   const emails: Uint8Array[] = [];
   const logs: Record<string, unknown>[] = [];
-  const state = { failSes: false, failCognito: false };
+  const state = { failSes: false, failCognito: false, noCognitoUser: false };
 
   const deps: Deps = {
     bucket: 'tickets-bucket',
@@ -97,6 +116,7 @@ function fakeAws() {
         assert.equal(command.input.Username, FAN_ID);
         assert.equal(command.input.UserPoolId, 'ap-southeast-1_test');
         if (state.failCognito) throw new Error('Cognito unavailable');
+        if (state.noCognitoUser) throw new UserNotFoundException({ message: 'User does not exist.', $metadata: {} });
         return { Username: FAN_ID, UserAttributes: [{ Name: 'email', Value: 'fan@example.com' }] };
       }) as Deps['cognito']['send'],
     },
@@ -175,15 +195,59 @@ describe('ticket-fn handler', () => {
   });
 
   test('unknown event types are logged and skipped, not failed', async () => {
-    const cancelled = { type: 'ConcertCancelled', version: 1, concertId: 'c1' };
-    const result = await createHandler(aws.deps)(
-      batch(record('m1', cancelled, 'ConcertCancelled'), record('m2', cancelled)),
-    );
+    const other = { type: 'SeatMapChanged', version: 1, concertId: 'c1' };
+    const result = await createHandler(aws.deps)(batch(record('m1', other, 'SeatMapChanged'), record('m2', other)));
 
     assert.deepEqual(result, { batchItemFailures: [] });
     assert.equal(aws.objects.size, 0);
     assert.equal(aws.emails.length, 0);
     assert.equal(aws.logs.filter((l) => l.msg === 'event type not handled; skipped').length, 2);
+  });
+
+  test('ConcertCancelled: one email with the reason and refund, no attachment, then its own marker', async () => {
+    const result = await createHandler(aws.deps)(batch(record('m1', concertCancelled, 'ConcertCancelled')));
+
+    assert.deepEqual(result, { batchItemFailures: [] });
+    assert.equal(aws.emails.length, 1);
+    const mime = Buffer.from(aws.emails[0]!).toString('utf8');
+    assert.match(mime, /\r\nTo: fan@example\.com\r\n/);
+    assert.ok(!mime.includes('application/pdf'), 'no attachment');
+    assert.match(mime, /Subject: =\?UTF-8\?B\?/);
+    const subject = Buffer.from(/Subject: =\?UTF-8\?B\?([^?]+)\?=/.exec(mime)![1]!, 'base64').toString('utf8');
+    assert.equal(subject, `Cancelled: ${concertCancelled.concert.title}`);
+    const text = mimeText(aws.emails[0]!);
+    assert.match(text, /Reason: Artist unwell/);
+    assert.match(text, /You will be refunded SGD 504\.00\./);
+    assert.ok(aws.objects.has(cancelledMarkerKey(ORDER_ID)));
+    assert.ok(!aws.objects.has(ticketPdfKey(ORDER_ID)), 'no PDF for a cancellation');
+  });
+
+  test('the e-ticket and the cancellation of the same order are separate emails, each sent once', async () => {
+    const handler = createHandler(aws.deps);
+    await handler(batch(record('m1', orderConfirmed, 'OrderConfirmed')));
+    await handler(batch(record('m2', concertCancelled, 'ConcertCancelled')));
+    const repeat = await handler(batch(record('m3', concertCancelled, 'ConcertCancelled')));
+
+    assert.deepEqual(repeat, { batchItemFailures: [] });
+    assert.equal(aws.emails.length, 2);
+    assert.ok(aws.logs.some((l) => l.msg === 'cancellation notice already sent; duplicate delivery skipped'));
+  });
+
+  test('a fan without a Cognito user gets the fallback address when one is set, and fails otherwise', async () => {
+    aws.state.noCognitoUser = true;
+    const withoutFallback = await createHandler(aws.deps)(batch(record('m1', concertCancelled, 'ConcertCancelled')));
+    assert.deepEqual(withoutFallback, {
+      batchItemFailures: [{ itemIdentifier: 'm1' }],
+    });
+    assert.equal(aws.emails.length, 0);
+    assert.ok(!aws.objects.has(cancelledMarkerKey(ORDER_ID)));
+
+    const withFallback = await createHandler({
+      ...aws.deps,
+      fallbackRecipient: 'tester@example.com',
+    })(batch(record('m1', concertCancelled, 'ConcertCancelled')));
+    assert.deepEqual(withFallback, { batchItemFailures: [] });
+    assert.match(Buffer.from(aws.emails[0]!).toString('utf8'), /\r\nTo: tester@example\.com\r\n/);
   });
 
   test('only the failing record is reported in batchItemFailures', async () => {

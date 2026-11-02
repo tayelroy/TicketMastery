@@ -3,7 +3,7 @@ export interface RawEmail {
   to: string;
   subject: string;
   text: string;
-  attachment: { filename: string; contentType: string; data: Uint8Array };
+  attachment?: { filename: string; contentType: string; data: Uint8Array };
 }
 
 const CRLF = '\r\n';
@@ -36,9 +36,8 @@ function encodeHeader(value: string): string {
 /** Addresses come from configuration and Cognito, but a stray line break must still never reach the headers. */
 const headerSafe = (value: string) => value.replace(/[\r\n]/g, '');
 
-/** multipart/mixed: a UTF-8 text part and one attachment, for SES v2 SendEmail with Content.Raw. */
+/** multipart/mixed: a UTF-8 text part and an optional attachment, for SES v2 SendEmail with Content.Raw. */
 export function buildRawEmail(email: RawEmail, boundary: string): Uint8Array {
-  const filename = headerSafe(email.attachment.filename).replace(/"/g, '');
   const lines = [
     `From: TicketMastery <${headerSafe(email.from)}>`,
     `To: ${headerSafe(email.to)}`,
@@ -52,15 +51,19 @@ export function buildRawEmail(email: RawEmail, boundary: string): Uint8Array {
     '',
     base64Lines(email.text),
     '',
-    `--${boundary}`,
-    `Content-Type: ${email.attachment.contentType}; name="${filename}"`,
-    `Content-Disposition: attachment; filename="${filename}"`,
-    'Content-Transfer-Encoding: base64',
-    '',
-    base64Lines(email.attachment.data),
-    '',
-    `--${boundary}--`,
-    '',
   ];
+  if (email.attachment) {
+    const filename = headerSafe(email.attachment.filename).replace(/"/g, '');
+    lines.push(
+      `--${boundary}`,
+      `Content-Type: ${email.attachment.contentType}; name="${filename}"`,
+      `Content-Disposition: attachment; filename="${filename}"`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      base64Lines(email.attachment.data),
+      '',
+    );
+  }
+  lines.push(`--${boundary}--`, '');
   return Buffer.from(lines.join(CRLF), 'utf8');
 }

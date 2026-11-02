@@ -19,20 +19,20 @@ Status: SNS/SQS/DLQ deployed; e-ticket bucket, SES identity and `ticket-fn` adde
 
 ## Resources
 
-- **SNS `<name>-order-events`**: the API publishes `OrderConfirmed` (attribute `eventType`); UC5 may publish
-  `ConcertCancelled` later, which ticket-fn skips.
+- **SNS `<name>-order-events`**: the API publishes `OrderConfirmed` (checkout) and, when an organiser cancels a concert,
+  one `ConcertCancelled` per confirmed order (organiser module); both carry the `eventType` message attribute.
 - **SQS `<name>-ticket-queue`** (SSE-SQS, long polling): visibility timeout = 6 × `ticket_fn_timeout_seconds`, as AWS
   recommends for Lambda event sources, so the queue and function timeouts can't drift apart. Redrives to
   **`<name>-ticket-dlq`** (14 days) after `max_receive_count` receives.
 - **S3 `<name>-etickets-*`**: private (public access blocked, `BucketOwnerEnforced`, SSE-S3, HTTPS-only bucket policy),
-  `force_destroy` for dev. Keys: `tickets/<orderId>.pdf` (the e-ticket) and `tickets/<orderId>.sent` (written after the
-  email went out; ticket-fn's idempotency marker).
+  `force_destroy` for dev. Keys: `tickets/<orderId>.pdf` (the e-ticket), and ticket-fn's idempotency markers written
+  after an email went out: `tickets/<orderId>.sent` (e-ticket) and `tickets/<orderId>.cancelled.sent` (cancellation).
 - **SES v2 email identity** for `ses_from_address`. Creating it sends the verification email.
 - **Lambda `<name>-ticket-fn`** (Node.js 22, arm64, outside the VPC), zipped from the committed bundle
   `lambdas/ticket-fn/bundle/index.js`: plan doesn't run npm. Event source mapping: batch 10,
   `ReportBatchItemFailures`, maximum concurrency 2 (the SES sandbox sends 1 email per second).
 - **IAM**: ticket-fn role with SQS receive/delete/attributes on `ticket-queue`, S3 get/put on `tickets/*` + list on the
-  bucket, `ses:SendEmail` limited to `ses:FromAddress = ses_from_address`, `cognito-idp:AdminGetUser` on the pool,
+  bucket, `ses:SendEmail` + `ses:SendRawEmail` limited to `ses:FromAddress = ses_from_address`, `cognito-idp:AdminGetUser` on the pool,
   logs on its own log group. On the API task role: `sns:Publish` on the topic (`messaging-order-events-publish`) and
   `s3:GetObject` on `tickets/*` + `s3:ListBucket` (`messaging-ticket-pdf-read`; listing turns a missing PDF into a
   404, which the API answers with 409 "still being prepared").
@@ -52,6 +52,7 @@ Status: SNS/SQS/DLQ deployed; e-ticket bucket, SES identity and `ticket-fn` adde
 | `log_retention_days` | `14` | ticket-fn log group retention |
 | `force_destroy` | `true` | Let `terraform destroy` empty the e-ticket bucket |
 | `alarm_actions` | `[]` | SNS topics for the DLQ alarm (monitoring's `alerts_topic_arn`) |
+| `fallback_recipient_email` | `""` | Testing only: verified address ticket-fn uses for fans without a Cognito user (`FALLBACK_RECIPIENT_EMAIL`) |
 | `max_receive_count` | `5` | Receives before a message moves to the DLQ |
 | `tags` | `{ Owner = "shihui" }` | Extra tags |
 
