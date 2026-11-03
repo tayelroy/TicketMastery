@@ -301,6 +301,9 @@ Do not debug on stage. For a single failed step, use that step's screenshot and 
 ## Fallback assets
 
 Take these during the dress rehearsal and save them to `docs/report/evidence/demo/`. The slides reuse some of them.
+`demo-01` to `demo-14` were taken on 3 Nov 2026 on cancelled rehearsal copies of the two concerts (test organiser and
+a test fan named "Demo Fan"); retake them at the dress rehearsal only if the UI changes. `demo-15` to `demo-17` and
+the recording need the real inboxes and console, so they are still to take.
 
 | File | Shows | Step / slide |
 |---|---|---|

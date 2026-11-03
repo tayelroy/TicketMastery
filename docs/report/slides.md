@@ -10,8 +10,8 @@ account and edge owner), linkage and security to Andrew (Cognito and API Gateway
 (waiting room), the evidence slide to Shi Hui (NFR-3 and NFR-4 owner), and limitations to Nai Xin, who also drives
 the demo.
 
-Screenshots marked *to take* are listed in `demo-script.md` (section "Fallback assets"); take them during the dress
-rehearsal and save them under `docs/report/evidence/demo/`.
+Screenshots are in `docs/report/evidence/demo/` (list in `demo-script.md`, section "Fallback assets"); the ones
+still marked *to take* need the real inboxes or the AWS console, so take them during the dress rehearsal.
 
 ## Timing
 
@@ -183,7 +183,7 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - Concert page: ticket types, prices, "N of M left"; seat map with held and sold seats
   - An expired hold shows as available (same rule as checkout)
   - Cache headers: list `max-age=60`, detail `max-age=15`, seat map `no-store`
-- **Figure:** screenshot *to take* `demo-05-concert-detail.png` (concert page with the seat map).
+- **Figure:** `evidence/demo/demo-05-concert-detail.png` (concert page with the seat map).
 - **Speaker notes:** Cody: Discovery is the public front door. Anyone can browse and search published concerts by
   title, artist or venue without signing in, and the list and detail are cacheable. Nai Xin: the concert page shows
   each ticket type with its price and how many are left, plus a seat map that refreshes every 15 seconds during a
@@ -197,7 +197,7 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - Token checked twice: API Gateway JWT authorizer, then again inside the API
   - My Tickets: the fan's confirmed orders only; another fan's order answers 404
   - PDF download: API checks S3, returns a 300 s pre-signed link; `409` until the PDF exists
-- **Figure:** screenshot *to take* `demo-13-ticket-page.png` (ticket page with "Download e-ticket (PDF)").
+- **Figure:** `evidence/demo/demo-13-ticket-page.png` (ticket page with "Download e-ticket (PDF)").
 - **Speaker notes:** Fans sign up with Cognito and verify their email. API Gateway checks the access token and the API
   verifies it again, so a misconfigured route can't bypass authorisation. My Tickets lists only your own confirmed
   orders; anyone else's order returns not found. The PDF stays in a private bucket: the API checks it exists and
@@ -213,7 +213,7 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - Conditional updates: overlapping runs never admit anyone twice; the page polls the status every 5 s
   - Checkout refuses a hold without a current admission: `403 not_admitted`
   - NFR-6: 20 fans, 4 admit runs, 0 order inversions
-- **Figure:** screenshots *to take* `demo-06-waiting-queued.png` and `demo-07-waiting-admitted.png` side by side.
+- **Figure:** `evidence/demo/demo-06-waiting-queued.png` and `evidence/demo/demo-07-waiting-admitted.png` side by side.
 - **Speaker notes:** The waiting room turns a crowd of 100,000 into a steady stream. Joining sends a message to a FIFO
   queue grouped by concert, so order is kept and a double click is dropped. The queue-manager Lambda hands out
   positions in DynamoDB. Every minute EventBridge Scheduler runs it again to admit the next 500 fans, but only while
@@ -230,7 +230,7 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
     releases them
   - `OrderConfirmed` → SNS → SQS → `ticket-fn`: PDF to S3, email through SES; a `.sent` marker makes redeliveries
     do nothing
-- **Figure:** the hold SQL from report §6.3 + screenshot *to take* `demo-09-checkout-hold.png` (countdown and
+- **Figure:** the hold SQL from report §6.3 + `evidence/demo/demo-09-checkout-hold.png` (countdown and
   "Pay $184.00").
 - **Speaker notes:** This statement is why no seat is sold twice. It updates only seats that are available or whose
   hold has expired, and if fewer rows come back than requested, the whole transaction rolls back. Postgres row locks
@@ -248,7 +248,7 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - Live dashboard: available, held, sold and revenue per ticket type, refreshed every 5 s
   - Cancel: every ticket holder is emailed (one `ConcertCancelled` per order → `ticket-fn` → SES)
   - Five tested SQL reporting views; QuickSight designed, not deployed
-- **Figure:** screenshot *to take* `demo-03-organiser-dashboard.png` (Sales panel with the lock banner).
+- **Figure:** `evidence/demo/demo-03-organiser-dashboard.png` (Sales panel with the lock banner).
 - **Speaker notes:** Organisers create a draft, add ticket types and a seat layout, and publish. The whole layout is
   replaced in one transaction, and publishing needs exactly one seat per ticket. Once the sale opens the layout locks,
   enforced in the service and by database triggers. The live dashboard reads the same seat rows checkout updates.
