@@ -111,7 +111,7 @@ open up to 130 connections, above the estimated limit of 80.
 
 ## State when read
 
-All 30 alarms were **OK** on 6 Nov (the 31st, `eticket-delivery-latency`, was added on 7 Nov). Earlier the same day, with the untrimmed set, the browse burst
+All 31 alarms were **OK** after the 7 Nov end-to-end pass (`e2e-7nov.md`; `eticket-delivery-latency` was added that day). On 6 Nov, with the untrimmed set, the browse burst
 (`loadtest/results/nfr2-burst-aws-20261106T021055Z.md`) put `ticketmastery-dev-discovery-ecs-at-max-capacity` into
 ALARM: discovery scaled from 1 to 3 tasks, its maximum, while account, waiting-room, checkout and organiser stayed at
 1 task each. It returned to OK after discovery scaled back in.

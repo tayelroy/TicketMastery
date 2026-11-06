@@ -106,8 +106,8 @@ Load assumptions for one major on-sale (Google Doc):
 **Capacity math.** 100,000 waiting fans polling `GET /status` every 5 s is ≈ 20,000 req/s, and `/join` alone at
 the 100 rps stage throttle takes ≈ 1,000 s for 100,000 fans. Today the excess gets `429`; a fan keeps their place in
 DynamoDB and the page simply polls again. For production: per-route throttles, `429` + `Retry-After` with jittered
-backoff in the page, an API Gateway quota raised before each on-sale, and `/status` served through CloudFront with a
-≈ 5 s TTL. NFR-1's 10 req/s baseline assumes the ≈ 5,000 normal-day users are mostly served static content by
+backoff in the page, an API Gateway quota raised before each on-sale, and a public per-concert "admitted up to
+position N" value cached at CloudFront (≈ 5 s), so the page works out its own place without a per-fan request. NFR-1's 10 req/s baseline assumes the ≈ 5,000 normal-day users are mostly served static content by
 CloudFront; the 10× test (100 req/s) is capped by that same throttle, so it proves the stack up to the throttle.
 
 ## 2.3 Use cases and functional requirements
@@ -599,8 +599,9 @@ risky combinations such as private-subnet tasks without egress or a VPC link to 
 ## 9.2 CI/CD and operations
 
 - **CI** (`ci.yml`, on pull requests and pushes to `main`): API type-check and tests against a Postgres 16 service
-  with the coverage gate (100% for `src/auth`, `src/config.ts`, `src/modules/account`), `ticket-fn` tests, and
-  `terraform fmt -check` + `validate` (`-backend=false`). `frontend.yml` type-checks and builds the frontend.
+  with the coverage gate (100% for `src/auth`, `src/config.ts`, `src/modules/account`), `ticket-fn` tests plus a
+  committed-bundle check, `queue-manager` unittests, and `terraform fmt -check` + `validate`; all green on 7 Nov.
+  `frontend.yml` type-checks and builds the frontend.
 - **Frontend deploy** (`deploy-frontend.yml`) is manual and runs only from `main`. It builds the SPA, syncs it to S3
   and invalidates CloudFront. It authenticates through GitHub OIDC, so no AWS keys are stored in GitHub.
 - **API image:** built for `linux/amd64`, tagged with the git SHA (`4a443fa` on all six services), pushed to ECR
@@ -636,7 +637,7 @@ risky combinations such as private-subnet tasks without egress or a VPC link to 
 - **Pay per request** for everything idle between on-sales: waiting room, e-tickets and API Gateway.
 
 **Actual spend.** Cost Explorer shows **USD 22.92** of usage in October 2026 (stack deployed from 22 Oct), all
-covered by credits, so USD 0 was charged. A full day cost USD 2.02 after the ALB became internal (estimate then ≈ 2.4).
+covered by credits, so USD 0 was charged. A full day cost USD 2.02 after the ALB became internal (estimate then ≈ 2.5).
 The largest items match the estimate's order: ALB 8.26, RDS 6.21, Fargate 3.34, public IPv4 2.93, WAF 2.05
 (`evidence/nfr11-cost.md`, Appendix B).
 
@@ -747,7 +748,7 @@ URL, and an organiser opened the live dashboard (Figure 5; full screenshots in `
    (`uc5-organiser-concerts.jpg`, `uc5-organiser-dashboard.jpg`);
 6. UC5 reporting: the views on the live database return the same totals (`evidence/uc5-reporting-views.md`); the
    Sales reports page on the reporting service, 6 Nov (`evidence/demo/demo-18-organiser-reports.png`);
-7. 7 Nov, six-service stack, real browser on CloudFront: sign-in → waiting room (admitted) → 2-seat hold → payment →
+7. 7 Nov, six-service stack, real browser on CloudFront, on a 10-seat test concert (`evidence/e2e-7nov.md`): sign-in → waiting room (admitted) → 2-seat hold → payment →
    e-ticket emailed 3.4 s after payment (`deliveryLatencyMs` 3429), PDF downloaded → dashboard "Sold 2 / 10" → Sales
    reports (SGD 108, 2 tickets, 1 order) → cancel → notice sent (1 order, 1 published); all 31 alarms OK afterwards.
 

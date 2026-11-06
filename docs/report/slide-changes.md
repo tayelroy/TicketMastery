@@ -5,8 +5,9 @@ estimates from `docs/cost-estimate.md`. Speaker notes for each slide are in `sli
 
 **Deck vs `slides.md`.** The deck has 24 pages, `slides.md` 21 slides. The three extra pages take time from their
 neighbours: Agenda (page 2) is inside slide 1's 0.50 min, Target HA (page 7) inside slide 5's 1.00 min, and "0 seats
-sold twice" (page 19) inside slide 16's 0.75 min, so the total stays 18.75 + 1.00 buffer. Re-export `slides.pptx`
-from Canva after these edits (the current pptx predates the last `slides.md` change).
+sold twice" (page 19) inside slide 16's 0.75 min, so the total stays 18.75 + 1.00 buffer. The Canva deck is the one
+we present; the old generated `slides.pptx` was removed so there is only one deck. Export the edited Canva deck to PDF
+for submission.
 
 ## Page 1 — Title
 - Old: "Five use cases, built and running in ap-southeast-1" → New: "Five use cases on six ECS services, running in ap-southeast-1"
@@ -127,7 +128,7 @@ No change.
 
 - **"100k fans poll every 5 s against a 100 rps throttle: what happens?"** ≈ 20,000 req/s; today the excess gets 429
   and the page polls again (the place in DynamoDB is kept). Production: per-route throttles, Retry-After with
-  jittered backoff, a raised API Gateway quota per on-sale, `/status` via CloudFront with a ≈ 5 s TTL (report §2.2).
+  jittered backoff, a raised API Gateway quota per on-sale, a public per-concert "admitted up to N" value cached at CloudFront (≈ 5 s) so pages compute their place locally; per-fan `/status` can't be cached (report §2.2).
 - **"Scale-out never met 5 min. Why trust on-sale day?"** Measured 4.2–5.6 min to running tasks, so we don't rely on
   it: min 2 tasks per service (run 2: 0 errors) plus an `aws_appautoscaling_scheduled_action` raising the minimum
   before `sale_starts_at`; the waiting room caps buyers at 500 per concert per minute.

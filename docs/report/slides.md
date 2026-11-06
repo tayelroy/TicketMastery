@@ -312,7 +312,7 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
     per concert per minute → ECS autoscaling (CPU 60%, 500 req/task/min)
   - Measured: one 0.25 vCPU task saturates at ≈ 60 req/s; autoscaling takes 4–6 min, so on-sales need pre-scaling
   - Capacity math: 100,000 fans polling every 5 s ≈ 20,000 req/s vs the 100 rps throttle → 429s, the page polls
-    again; production: per-route throttles, Retry-After + jittered backoff, raised quota, status via CloudFront
+    again; production: per-route throttles, Retry-After + jittered backoff, raised quota, a cached per-concert "admitted up to N" at CloudFront
   - 6 Nov, split stack: 10 → 100 req/s, 57,600 requests, 0 dropped, p95 63 ms; only discovery scaled (1 → 3 tasks in
     5.6 min), the other four stayed at 1
   - Spike-facing parts are on-demand: SQS, SNS, DynamoDB, Lambda
