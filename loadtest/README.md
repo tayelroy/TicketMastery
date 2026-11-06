@@ -27,11 +27,9 @@ k6/lib/api.js          organiser concert setup, seat map, waiting-room admission
 k6/lib/browse.js       browse request mix (NFR-1, NFR-2)
 k6/lib/summary.js      results/<test>-<ts>.json + .md
 k6/*.js                setup-concert, nfr1, nfr2, nfr3, nfr4, nfr6
-scripts/lib.sh         AWS profile/account guard, resource names (ticketmastery-dev-*), DRY_RUN; SERVICE_KEY picks the ECS service (default discovery)
+scripts/lib.sh         AWS profile/account guard, resource names (ticketmastery-dev-*), DRY_RUN
 scripts/*.sh           Cognito users, metrics, drills, checks
 sql/oversell-check.js  NFR-3 SQL, run inside the API container (ECS Exec) or locally
-sql/reporting-role.js  QuickSight DB login (reporting_ro), run inside the API container by scripts/reporting-user.sh
-                       (see infra/modules/quicksight/README.md)
 dev/fake-waiting-room.mjs  local dry runs only: the waiting room's contract in memory, proxying the rest
 state/                 gitignored: tokens.json, users.json, lt-password, concert.json
 ```
@@ -175,25 +173,22 @@ scripts/alb-metrics.sh nfr1 $(jq -r '.startedAt, .finishedAt' "$(ls -t results/n
 Expect p95 / p99 and `PASS` or `FAIL` against 300 / 800 ms, then the ALB p95/p99 per minute. Screenshot: CloudWatch
 metric ALB `TargetResponseTime` (p95, 1-minute period) over the window.
 
-**9. NFR-2 burst** (≈ 21 min). The burst is browse traffic, so it lands on the `discovery` ECS service (the API runs
-one ECS service per use case, each scaling on its own). Switch autoscaling on first, without editing `terraform.tfvars`:
-`terraform -chdir=../infra/envs/dev plan -out=/tmp/as.tfplan -var enable_autoscaling=true`;
-apply only if the plan touches just the 5 scalable targets, their CPU and request policies, the services' desired
-counts and the 5 monitoring scaling-ceiling alarms. Each service's maximum comes from `ecs_services` (discovery 3).
+**9. NFR-2 burst** (≈ 21 min). Switch autoscaling on first, without editing `terraform.tfvars`:
+`terraform -chdir=../infra/envs/dev plan -out=/tmp/as.tfplan -var enable_autoscaling=true -var autoscaling_max_capacity=3`;
+apply only if the plan touches just the scalable target, the two scaling policies, the service's desired count and
+the monitoring scaling-ceiling alarm.
 
 ```bash
 BASE_RPS=10 MULT=10 WARM=2m RAMP=1m HOLD=10m COOL=3m scripts/nfr2-burst.sh
 ```
 
 Expect the k6 table (peak minute ≈ 100 req/s, `429 (throttled)` count, `Dropped (non-429 errors)` 0), then
-`Tasks before 1`, `Max tasks` 2–3 with the minutes after the ramp started, the max desired tasks of every API service
-(only `discovery` should grow), the task count every 15 s, the scaling activities and ECS events. Screenshots while it
-runs: the `ticketmastery-dev` CloudWatch dashboard (whole burst; the per-service task and CPU graphs), ECS → service →
-Events and Tasks tabs, any alarm emails. Afterwards plan/apply again without the `-var` flag (the plan must only
-remove those resources); the counts return to 1.
+`Tasks before 1`, `Max tasks` 2–3 with the minutes after the ramp started, the task count every 15 s, the
+scaling activities and ECS events. Screenshots while it runs: the `ticketmastery-dev` CloudWatch dashboard (whole
+burst), ECS → service → Events and Tasks tabs, any alarm emails. Afterwards plan/apply again without the `-var`
+flags (the plan must only remove those resources); the count returns to 1.
 
-**10. NFR-5 / F1 task loss** (≈ 3–5 min; with autoscaling off, so one task per service). Stops the `discovery` task,
-which also answers `/health`:
+**10. NFR-5 / F1 task loss** (≈ 3–5 min; with autoscaling off, so one task):
 
 ```bash
 scripts/nfr5-f1-task-loss.sh

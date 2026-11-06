@@ -8,11 +8,8 @@ internal reporting and sales statistics, for example in QuickSight.
   by the API's migration runner like every other migration, and checked row by row in
   [`test/reporting-views.test.ts`](../services/ticketmastery-api/test/reporting-views.test.ts) against orders made
   through the real organiser and checkout services.
-- **Built in Terraform, off by default:** Amazon QuickSight (now sold as *Amazon Quick Sight*) on top of those
-  views, in [`infra/modules/quicksight`](../infra/modules/quicksight/README.md), wired into `envs/dev` behind
-  `enable_quicksight = false` because it is billed per user per month (see [Why it is not deployed by default](#why-it-is-not-deployed-by-default)).
-  The read-only database role is migration
-  [`0004_uc5_reporting_role.sql`](../services/ticketmastery-api/migrations/0004_uc5_reporting_role.sql).
+- **Design only:** Amazon QuickSight (now sold as *Amazon Quick Sight*) on top of those views. It is not in
+  Terraform and not subscribed, because it is billed per user per month (see [Why it is not deployed](#why-it-is-not-deployed)).
 
 The live organiser dashboard (`GET /api/organiser/concerts/:id/dashboard`, polled every 5 s) stays the tool for
 the on-sale moment. The views are for after-the-fact questions across concerts: how much did we sell, of what,
@@ -63,20 +60,14 @@ SELECT concert_title, currency, seats_sold, gross_revenue_cents / 100.0 AS gross
  ORDER BY concert_starts_at, currency;
 ```
 
-## QuickSight design
-
-What the module builds differs from the design below in three places: datasets are **DIRECT_QUERY** (no SPICE or
-refresh schedules), the database role is `reporting_ro` from migration 0004 (password set by
-`loadtest/scripts/reporting-user.sh`, kept in Secrets Manager), and the RDS ingress rule lives in the module
-instead of `rds_extra_ingress_sg_ids`. It builds one Sales dashboard for the admin; Reader accounts and
-row-level security are not built. Steps, cost and teardown: [module README](../infra/modules/quicksight/README.md).
+## QuickSight design (not deployed)
 
 ```mermaid
 flowchart LR
   org[Organisers<br/>QuickSight Readers] --> dash[QuickSight dashboards<br/>row-level security on organiser_id]
   dash --> spice[(SPICE datasets<br/>one per report_* view)]
-  spice -- scheduled refresh --> vpcc[QuickSight VPC connection<br/>ENIs in the private subnets, SG ticketmastery-dev-quicksight-sg]
-  vpcc -- "5432, TLS, user reporting_ro" --> rds[(RDS PostgreSQL<br/>report_* views)]
+  spice -- scheduled refresh --> vpcc[QuickSight VPC connection<br/>ENIs in the private subnets, SG ticketmastery-dev-quicksight]
+  vpcc -- "5432, TLS, user quicksight_reader" --> rds[(RDS PostgreSQL<br/>report_* views)]
 ```
 
 ### Edition and account
@@ -95,19 +86,20 @@ which places QuickSight network interfaces in our VPC:
 
 - **Subnets:** `private_subnet_ids` (the two private subnets, AZ a and AZ b; a VPC connection needs at least two).
   QuickSight's ENIs need no internet access, so the missing NAT gateway does not matter.
-- **Security group** `ticketmastery-dev-quicksight-sg` in the VPC: no inbound rules, one egress rule to the RDS
+- **Security group** `ticketmastery-dev-quicksight` in the VPC: no inbound rules, one egress rule to the RDS
   security group on 5432. (AWS's extra "allow all inbound TCP from the database SG" rule applies only to VPC
   connections created before 27 April 2023;
   [security group rules](https://docs.aws.amazon.com/quick/latest/userguide/vpc-security-groups.md).)
-- **RDS ingress:** an inbound rule on the RDS SG for port 5432 from that security group (in the `quicksight`
-  module; the design had it as an entry in `rds_extra_ingress_sg_ids`). No change to the RDS module.
+- **RDS ingress:** add that security group's ID to the existing root variable `rds_extra_ingress_sg_ids`, which
+  the `security` module turns into an inbound rule on the RDS SG for port 5432. No other change to the RDS module.
 - **Execution role** trusted by `quicksight.amazonaws.com` with `ec2:CreateNetworkInterface`,
   `ec2:ModifyNetworkInterfaceAttribute`, `ec2:DeleteNetworkInterface`, `ec2:DescribeSubnets` and
   `ec2:DescribeSecurityGroups`, so QuickSight can manage its ENIs.
 
 These pieces are Terraform resources (`aws_security_group`, `aws_iam_role`, `aws_quicksight_vpc_connection`,
-`aws_quicksight_data_source`, `aws_quicksight_data_set`), in `infra/modules/quicksight` together with the account
-subscription and the admin user. One console step remains: granting QuickSight access to the reporting secret.
+`aws_quicksight_data_source`, `aws_quicksight_data_set`, `aws_quicksight_refresh_schedule`), so turning reporting
+on later is a new `infra/modules/reporting` module plus one entry in `rds_extra_ingress_sg_ids`. The account
+subscription and user invitations are console steps.
 
 ### Database user: read-only, views only
 
@@ -115,18 +107,26 @@ QuickSight connects as its own login, never the RDS master user. It can read the
 PostgreSQL views run with their owner's privileges, so the reporting user needs no grant on `orders`, `seats` or
 any other table, and cannot see fan ids or hold details.
 
-Built as migration [`0004`](../services/ticketmastery-api/migrations/0004_uc5_reporting_role.sql): role
-`reporting_ro`, NOLOGIN, `default_transaction_read_only = on`, connection limit 10, `USAGE` on the schema and
-`SELECT` on the five views. Roles are cluster-wide, so the migration creates it only if missing (the tests'
-throwaway schemas reuse it) and grants on its own schema. The migration carries no password:
-`loadtest/scripts/reporting-user.sh` sets `LOGIN` and a generated password later and stores it in Secrets Manager.
+```sql
+-- Run once as the master user. Keep the password in Secrets Manager, not in git.
+CREATE ROLE quicksight_reader LOGIN PASSWORD '<from Secrets Manager>';
+ALTER ROLE quicksight_reader SET default_transaction_read_only = on;
+ALTER ROLE quicksight_reader CONNECTION LIMIT 5;
+GRANT CONNECT ON DATABASE ticketmastery TO quicksight_reader;
+GRANT USAGE ON SCHEMA public TO quicksight_reader;
+GRANT SELECT ON report_confirmed_orders, report_sales_by_concert, report_sales_by_ticket_type,
+                report_sales_by_day, report_seat_status TO quicksight_reader;
+```
+
+This is not a migration on purpose: roles are cluster-wide (the tests' throwaway schemas would collide), a
+migration must not carry a password, and the user is only needed once QuickSight exists.
 
 The QuickSight data source is **PostgreSQL**, host = the RDS endpoint, database `ticketmastery`, **SSL on**
 (PostgreSQL 16 on RDS enforces TLS by default), through the VPC connection above.
 
 ### Datasets and SPICE refresh
 
-In the design, each `report_*` view is one dataset, imported into **SPICE** rather than queried directly, so opening a dashboard
+Each `report_*` view is one dataset, imported into **SPICE** rather than queried directly, so opening a dashboard
 never adds load to the single `db.t4g.micro` that also serves checkout. The data is tiny (kilobytes per concert),
 well inside the 10 GB of SPICE included with the Author.
 
@@ -178,7 +178,7 @@ $$24 + 2 \times 3 = \text{USD } 30 \text{ per month}$$
 The pricing page lists no charge for VPC connections, and the extra security group is free; the hourly SPICE
 refreshes add a few seconds of RDS work per hour.
 
-## Why it is not deployed by default
+## Why it is not deployed
 
 - **Per-user monthly billing.** QuickSight charges each user per month, not per use, so it costs the same whether
   anyone opens the dashboard or not.
@@ -189,8 +189,6 @@ refreshes add a few seconds of RDS work per hour.
 - **The graded use case is covered without it.** Organisers already get live counts from the API dashboard, and
   the reporting data is real and tested: the views return the demo concert's sales and can be queried directly
   (`psql`, or the RDS Query Editor) for the report.
-- **Switching it on is two Terraform applies and one console step**, with no application change: run
-  `loadtest/scripts/reporting-user.sh`, set `enable_quicksight = true` and apply, grant QuickSight the reporting
-  secret in the console, set `quicksight_secret_access_granted = true` and apply
-  ([module README](../infra/modules/quicksight/README.md#steps)). Not deploying by default was decided 2026-10-31
-  (see [plans/final-submission.md](plans/final-submission.md)).
+- **Switching it on is a console-and-Terraform step**, with no application change: subscribe to Enterprise, create
+  the read-only user, add the VPC connection's SG to `rds_extra_ingress_sg_ids`, import the five views into SPICE
+  and build the dashboard. Decided 2026-10-31 (see [plans/final-submission.md](plans/final-submission.md)).

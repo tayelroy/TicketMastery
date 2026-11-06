@@ -27,9 +27,7 @@ alb_internal        = true       # internal ALB with vpc_link (+ alb_ingress_cid
 alb_origin_domain   = ""         # origin_header only, e.g. "origin.example.com"
 waiting_room_public = false      # true = guests can join the waiting room without signing in
 
-# API services: one image, one ECS service per use case (ecs_services below).
-# task_cpu / task_memory / desired_count / autoscaling_*_capacity are defaults for every service;
-# a value set in an ecs_services entry wins over them.
+# API service
 image_tag                     = "latest"
 container_port                = 3000
 task_cpu                      = 256
@@ -45,19 +43,8 @@ container_insights            = "disabled"
 log_retention_days            = 14
 enable_autoscaling            = false # configurable; off for the implementation
 autoscaling_min_capacity      = 1
-autoscaling_max_capacity      = 2 # only for services without their own autoscaling_max (the defaults below set it for all)
+autoscaling_max_capacity      = 2
 ecr_force_delete              = true
-
-# One ECS service per use case. discovery is the ALB default (unmatched paths + /health); the others need
-# path_patterns and a fixed listener_priority (> 20). Optional per service: desired_count, autoscaling_min,
-# autoscaling_max, cpu, memory, tg_short_name. Setting ecs_services replaces the whole map, so copy all five.
-ecs_services = {
-  discovery    = { modules = ["discovery"], autoscaling_max = 3 }
-  account      = { modules = ["account"], path_patterns = ["/api/me", "/api/me/*"], listener_priority = 110, autoscaling_max = 2 }
-  waiting-room = { modules = ["waiting-room"], path_patterns = ["/api/waiting-room", "/api/waiting-room/*"], listener_priority = 120, tg_short_name = "wroom", autoscaling_max = 3 }
-  checkout     = { modules = ["checkout"], path_patterns = ["/api/checkout", "/api/checkout/*"], listener_priority = 130, autoscaling_max = 3 }
-  organiser    = { modules = ["organiser"], path_patterns = ["/api/organiser", "/api/organiser/*"], listener_priority = 140, autoscaling_max = 2 }
-}
 
 # RDS (single-AZ; pinned to AZ a automatically while db_multi_az = false)
 db_engine_version          = "16"
@@ -86,12 +73,3 @@ db_skip_final_snapshot     = true
 # db_deletion_protection     = true
 # db_backup_retention_period = 7
 # ------------------------------------------------------------------------------
-
-# UC5 reporting in QuickSight (infra/envs/dev/quicksight.tf). Billed per user per month while subscribed: follow the
-# steps in infra/modules/quicksight/README.md (migration, reporting-user.sh, first apply, console grant, second apply).
-enable_quicksight                = false # true = subscribe to Enterprise + VPC connection to RDS
-quicksight_secret_access_granted = false # true only after granting QuickSight the reporting secret in the console
-# quicksight_account_name        = "ticketmastery-dev-000246635159" # default: <project>-<environment>-<account id>
-# quicksight_admin_iam_arn       = "arn:aws:iam::000246635159:user/elroy"
-# quicksight_register_admin_user = false # only if Terraform itself runs as quicksight_admin_iam_arn
-# quicksight_currency            = "SGD"

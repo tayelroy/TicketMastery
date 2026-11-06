@@ -197,10 +197,14 @@ resource "aws_ecs_service" "this" {
 
   propagate_tags = "SERVICE"
 
-  # Task definition changes ARE managed by Terraform (no ignore_changes): bump
-  # image_tag (or push a new `latest` and force a new deployment) to roll out.
+  # Task definition changes ARE managed by Terraform: bump image_tag to roll out.
+  # desired_count is only the starting count: autoscaling owns it afterwards, and an apply in the middle of a
+  # scale-out would otherwise reset the service to 1 task. To change it on a running service, use
+  # `aws ecs update-service --desired-count` (or the autoscaling min/max).
 
   lifecycle {
+    ignore_changes = [desired_count]
+
     precondition {
       condition     = contains(keys(var.services), var.default_service)
       error_message = "default_service must be a key of services."
