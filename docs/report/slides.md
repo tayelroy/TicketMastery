@@ -43,7 +43,7 @@ still marked *to take* need the real inboxes or the AWS console, so take them du
 | | Buffer (hand-overs, demo overrun) | | 1.00 |
 | | **Total** | | **19.75** |
 
-Per person (slides only, excluding the demo): Elroy 5.25, Cody 2.25 (+ half of slide 8), Andrew 1.75, Yan Ting
+Per person (slides only, excluding the demo): Elroy 5.50, Cody 2.00 (+ half of slide 8), Andrew 1.75, Yan Ting
 1.50, Shi Hui 1.50, Nai Xin 0.50 (+ half of slide 8) + demo driver.
 
 Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65–75 words, 0.75 min ≈ 95–105 words,
@@ -132,8 +132,8 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - Beside the request path: waiting room (SQS FIFO → `queue-manager` → DynamoDB, Scheduler every minute) and
     e-tickets (SNS → SQS → `ticket-fn` → S3 + SES)
   - Deployed: 1 AZ, no NAT, 6 services × 1 task, single-AZ RDS, ≈ USD 150/month · Target HA: 2 AZs, NAT per AZ,
-    ≥ 2 tasks per service (12), Multi-AZ RDS, ≈ USD 311/month (estimates)
-  - One `tfvars` block switches between the two; `check` blocks reject invalid combinations
+    ≥ 2 tasks per service (12), Multi-AZ RDS, ≈ USD 310/month (estimates)
+  - One `tfvars` block switches between the two; preconditions block invalid settings, `check` blocks warn
 - **Figure:** `figures/implementation-architecture.png` (main), `figures/target-ha-architecture.png` (second build or
   inset). Both are regenerated for the six services.
 - **Speaker notes:** This is what is deployed. Fans hit CloudFront with WAF; the React app comes from a private S3
@@ -141,19 +141,20 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   through a VPC link, so the ALB is never on the internet. The ALB routes each path to one of six Fargate services.
   Two event-driven parts sit beside them: the waiting room and the e-ticket pipeline. As the instructor asked, we
   deploy one AZ with no NAT gateway, about 150 dollars a month. The HA design adds a second AZ, NAT per AZ, two tasks
-  per service and Multi-AZ RDS for about 311. Both come from the same Terraform; one variable block switches them.
+  per service and Multi-AZ RDS for about 310. Both come from the same Terraform; one variable block switches them.
 
 ## Slide 6. Resource allocation and justification
 
 - **Presenter:** Cody · **Minutes:** 0.75
 - **On slide:**
   - Fargate 6 services × 1 task × 0.25 vCPU / 0.5 GB; each autoscales on CPU 60% and ALB requests per task, max 2–3
-    (6 × 11.3 ≈ USD 68)
+    (6 × 11.2 ≈ USD 67); ≈ 60 req/s per task measured, so max 3 covers the 100 rps throttle; x86 (amd64 image), no
+    Spot (no interruptions mid-on-sale)
   - RDS `db.t4g.micro`, 20 GB gp3, encrypted, single-AZ (≈ USD 21): transactions for zero double-booking
   - Internal ALB (≈ 24.2) and one public IP per task (6 × 3.65 ≈ 22) instead of a NAT gateway (≈ 43 per AZ)
   - HTTP API, not REST: its VPC link targets the ALB directly; REST would need an extra NLB (≈ 18+)
   - Spiky parts are pay-per-request: SQS, DynamoDB on-demand, Lambda, Scheduler ≈ USD 0; WAF (1 web ACL, 2 rules)
-    ≈ 7; monitoring ≈ 6.3
+    ≈ 7; monitoring ≈ 6.4
 - **Figure:** condensed version of the report §4 table (layer / configuration / ≈ USD per month).
 - **Speaker notes:** We picked the smallest sizes and let the waiting room protect them. Each of the six services runs
   one quarter-vCPU task, and a micro Graviton database is enough because only 500 new buyers per concert per minute
@@ -171,15 +172,16 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
     admit step
   - E-tickets: checkout → SNS `order-events` → SQS `ticket-queue` (DLQ after 5) → `ticket-fn` → Cognito, S3, SES
   - Security-group chain: VPC link SG → ALB SG (80) → task SG (container port) → RDS SG (5432)
-  - One least-privilege IAM role per component (the six API services still share one task role); reporting logs in
-    to RDS as `reporting_ro`, SELECT on five views only
+  - Own least-privilege IAM roles for `queue-manager`, `ticket-fn`, the Scheduler and GitHub Actions; the six API
+    services still share one task role; reporting logs in to RDS as `reporting_ro`, SELECT on five views only
 - **Figure:** `figures/purchase-sequence.png`.
-- **Speaker notes:** This sequence shows how the resources link during an on-sale. The fan's join goes through the API
-  into a FIFO queue grouped by concert, so arrival order is kept, and the queue-manager Lambda writes a position into
-  DynamoDB. Every minute the scheduler admits the next batch. When the fan holds seats, the API first reads DynamoDB
-  to check admission, then runs the hold in Postgres. Payment publishes OrderConfirmed to SNS, which fans out to SQS
-  and the ticket Lambda. Inside the VPC each hop only accepts the one before it. Each component has its own IAM role;
-  the six API services still share one, which is our next step.
+- **Speaker notes:** This sequence shows how the resources link during an on-sale. The fan's join goes to the
+  waiting-room service, into a FIFO queue grouped by concert, so arrival order is kept, and the queue-manager Lambda
+  writes a position into DynamoDB. Every minute the scheduler admits the next batch. When the fan holds seats, the
+  checkout service first reads DynamoDB to check admission, then runs the hold in Postgres. Payment publishes
+  OrderConfirmed to SNS, which fans out to SQS and the ticket Lambda. Inside the VPC each hop only accepts the one
+  before it. The Lambdas and the scheduler have their own IAM roles; the six API services still share one, which is
+  our next step.
 
 ## Slide 8. UC1 Concert discovery
 
@@ -282,19 +284,21 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
 
 - **Presenter:** Elroy · **Minutes:** 0.75
 - **On slide:**
-  - 30 CloudWatch alarms, all OK; ALARM and OK → SNS → email. Per service: no healthy hosts + at max capacity (12);
+  - 31 CloudWatch alarms; ALARM and OK → SNS → email. Per service: no healthy hosts + at max capacity (12);
     busiest-service CPU and memory (MAX over the six); latency, 5xx, queues, DLQs, Lambda, RDS
-  - Thresholds from the NFRs: ALB p95 > 300 ms, 5xx > 1%, healthy hosts < 1, ticket-queue age > 60 s, any DLQ
-    message
+  - Thresholds from the NFRs: ALB p95 > 300 ms, 5xx > 1%, healthy hosts < 1, ticket-queue age > 60 s, e-ticket
+    delivery p95 > 60 s (NFR-7), any DLQ message
   - Custom metrics without a NAT: `WaitingRoomSize` and `ETicketDeliveryLatency` as EMF log lines; checkout failures
     from log metric filters
   - Dashboard `ticketmastery-dev`: alarm panel + graphs with threshold lines, one line per service on the ECS graphs
-  - First split had 41 alarms; per-service CPU/memory/unhealthy-host copies were noise, so we cut to 30
+  - First split had 41 alarms; per-service CPU/memory/unhealthy-host copies were noise, so we cut to 30, then added
+    the NFR-7 delivery-latency alarm (31)
   - Alerts fired for real in the burst test (API Gateway 5xx and latency, ALB 5xx and latency, then at-max-capacity);
-    forced `join-dlq-not-empty` → ALARM and OK emails within the same minute, 0 failed deliveries
+    forced `join-dlq-not-empty` → ALARM and OK emails 46 s apart, 0 failed deliveries
+  - Runbook: alarm → first action → owner (report §8); 429 alarm and on-call rota are future work
 - **Figure:** `evidence/nfr2-bursts-latency-cpu.png` (CloudWatch graph of the bursts); screenshot *to take*
   `demo-17-alarm-email.png`.
-- **Speaker notes:** Monitoring is its own Terraform module, with 30 alarms. Each service has a no-healthy-host and an
+- **Speaker notes:** Monitoring is its own Terraform module, with 31 alarms. Each service has a no-healthy-host and an
   at-max-capacity alarm; CPU and memory alarm on the busiest service. Copying every alarm per service gave 41, mostly
   noise, so we trimmed. Thresholds come from the NFRs, for example ALB p95 above 300 milliseconds, or an e-ticket
   waiting more than a minute. The queue-manager has no NAT, so it prints its metric as an embedded metric log line. Every alarm emails on both alarm and recovery,
@@ -306,7 +310,9 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
 - **On slide:**
   - Layers: CloudFront edge cache → WAF 2,000 req / 5 min per IP → API Gateway 100 rps / 200 burst → waiting room 500
     per concert per minute → ECS autoscaling (CPU 60%, 500 req/task/min)
-  - Measured: one 0.25 vCPU task saturates at ≈ 60 req/s; autoscaling takes 4–5 min, so on-sales need pre-scaling
+  - Measured: one 0.25 vCPU task saturates at ≈ 60 req/s; autoscaling takes 4–6 min, so on-sales need pre-scaling
+  - Capacity math: 100,000 fans polling every 5 s ≈ 20,000 req/s vs the 100 rps throttle → 429s, the page polls
+    again; production: per-route throttles, Retry-After + jittered backoff, raised quota, a cached per-concert "admitted up to N" at CloudFront
   - 6 Nov, split stack: 10 → 100 req/s, 57,600 requests, 0 dropped, p95 63 ms; only discovery scaled (1 → 3 tasks in
     5.6 min), the other four stayed at 1
   - Spike-facing parts are on-demand: SQS, SNS, DynamoDB, Lambda
@@ -316,7 +322,7 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   1 → 3); `evidence/nfr2-bursts-requests.png` (31 Oct–1 Nov runs) if there is room.
 - **Speaker notes:** Scalability is layered: CloudFront serves the app from the edge, WAF and the API Gateway throttle
   shed floods, and the waiting room lets only 500 new buyers per concert per minute reach the API. The burst test
-  taught us something: one small task saturates at about 60 requests a second and autoscaling needs four to five
+  taught us something: one small task saturates at about 60 requests a second and autoscaling needs four to six
   minutes, so starting from one task we dropped 3% of requests before it caught up. On the split stack the same
   burst dropped nothing, and only discovery scaled, to three tasks; the other services stayed at one. That still took
   5.6 minutes, so organisers' sale times should trigger pre-scaling.
@@ -332,11 +338,12 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - NFR-1 browse p95 30 ms (< 300) · NFR-2 10× burst: 3.3% failed from 1 task, 0 from 2 tasks; 6 Nov split stack
     0 dropped, p95 63 ms, scale-out 5.6 min (≤ 5 not met)
   - NFR-5 task loss: 76 s outage (≤ 5 min) · NFR-7 e-tickets: 10/10 within 60 s, p95 9.9 s
-  - NFR-8/9 restore: RPO 2.8 min, RTO 9 min · NFR-10 security config: pass · NFR-11 October spend USD 22.92, all
-    credits
+  - NFR-8/9 restore: RPO 2.8 min, RTO 9 min 14 s · NFR-10 security config: pass · NFR-11 October spend USD 22.92, all
+    credits · 7 Nov end-to-end pass on the six-service stack: e-ticket emailed 3.4 s after payment, cancel notice
+    sent, all 31 alarms OK
 - **Figure:** results table from report §10, condensed to NFR / target / measured / pass.
 - **Speaker notes:** Every NFR has a repeatable script, run against the live stack. The key result is correctness:
-  two hundred admitted fans raced for twenty seats, 278 lost the race cleanly, and SQL run inside the VPC found no
+  one hundred admitted fans, in two runs, raced for twenty seats, 278 lost the race cleanly, and SQL run inside the VPC found no
   seat sold twice. Expired holds come back within a second, and the queue admits strictly in arrival order. We also
   report what didn't pass first time: from a single task, the 10-times burst dropped 3% of requests, and the first
   e-ticket run hit an IAM gap that we fixed; those orders were retried from the queue and none were lost.
@@ -348,17 +355,21 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
   - Terraform: one root `infra/envs/dev`, one module per area with one owner; remote state in versioned S3 with
     S3-native locking
   - Every change is `plan -out` → review → `apply` of that plan, announced to the team first
-  - CI/CD: frontend type-check and build on PRs, deployed from `main` through GitHub OIDC (no AWS keys). The API is
-    not in CI: its image is built, tagged with the git SHA, pushed to ECR (scanned) and rolled out to the six services
-    with Terraform by hand; circuit-breaker rollback
+  - CI (`ci.yml`, PRs and pushes to `main`): API type-check + tests against Postgres 16 with a coverage gate,
+    `ticket-fn` tests, `terraform fmt -check` + `validate`; frontend build; frontend deploy from `main` through
+    GitHub OIDC (no AWS keys). API rollout is still manual: image tagged with the git SHA, pushed to ECR (scanned),
+    rolled out with Terraform; circuit-breaker rollback
+  - Incident: cutover gave ≈ 5 min of 503 (old target group deleted before the listener switched); now new target
+    groups and rules are created before the old are removed
   - Trunk-based branches, Conventional Commits, CODEOWNERS per module, migration and Lambda, PR template checklist
   - API tests against real Postgres: seat-hold race, layout triggers, reporting views
 - **Figure:** module ownership table from report §9.1.
 - **Speaker notes:** Everything is Terraform. One root module wires one module per area, and each module has one
   owner, the same person who presents that part today. State is shared in a versioned S3 bucket with locking, so only
   one apply runs at a time, and every change is planned, reviewed and applied from the saved plan after telling the
-  team. Only the frontend deploys from CI, through GitHub OIDC, so no AWS keys are stored in GitHub; the API
-  image we push and roll out with Terraform ourselves. CODEOWNERS routes
+  team. CI tests the API against Postgres, the ticket Lambda, and Terraform formatting and validation on every pull
+  request; the frontend deploys through GitHub OIDC, so no AWS keys are stored in GitHub. The API rollout itself is
+  still a manual Terraform apply. CODEOWNERS routes
   each pull request to the owner of what it touches. Our tests run against real Postgres, including the race for the
   same seats.
 
@@ -371,7 +382,8 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
     Terraform creates empty: neither in code, `tfvars` or state
   - Task loss target ≤ 5 min (drill F1: 76 s outage); data corruption: point-in-time restore, RPO ≤ 30 min,
     RTO ≤ 1 h (drill F4: RPO 2.8 min, database back in 9 min 14 s)
-  - AZ and region loss: design only · Accepted dev gaps: HTTP inside the VPC, MFA off, SES sandbox
+  - AZ and region loss: design only, never exercised · Accepted dev gaps: HTTP inside the VPC, MFA off, SES sandbox,
+    DB TLS without certificate verification
 - **Figure:** condensed tables from report §9.5 and §9.6.
 - **Speaker notes:** Security is layered from the edge in: HTTPS only, WAF rules, a bucket reachable only through
   CloudFront, tokens checked twice, and a private, encrypted database. No password is in our code or state: RDS
@@ -383,16 +395,16 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
 
 - **Presenter:** Cody · **Minutes:** 0.50
 - **On slide:**
-  - Deployed ≈ USD 150/month for the whole stack (≈ 5.0/day); target HA ≈ USD 311/month (≈ 10.2/day); estimates
-  - Split into six services: +5 tasks × (11.3 Fargate + 3.65 IPv4) ≈ +75; 30 alarms + dashboard ≈ 6.3
+  - Deployed ≈ USD 150/month for the whole stack (≈ 4.9/day); target HA ≈ USD 310/month (≈ 10.2/day); estimates
+  - Split into six services: +5 tasks × (11.2 Fargate + 3.65 IPv4) ≈ +74; 31 alarms + dashboard ≈ 6.4
   - Largest saving: no NAT gateways (two with Elastic IPs ≈ USD 94/month)
   - AWS Budgets, USD 80/month: alerts at 20, 40, 60, 80 actual and on a forecast above 80; the new run rate exceeds
     80, so the forecast alert will fire
   - `terraform destroy` after work sessions; about 15 minutes to recreate
-  - Spend to date: USD 22.92 of usage in October (USD 2.02/day measured), all covered by credits (NFR-11); AWS Free
-    plan, USD 123.33 credits left on 6 Nov, expiring 2027-02-18
+  - Spend to date: USD 22.92 of usage in October (USD 2.02–2.26/day measured), all covered by credits; project total
+    ≈ USD 58 with November (estimate, NFR-11); AWS Free plan, USD 123.33 credits left on 6 Nov, expiring 2027-02-18
 - **Figure:** cost table from report Appendix B; Budgets console screenshot *to take* (`ticketmastery-dev-monthly-cost`).
-- **Speaker notes:** Six services cost more: about 150 dollars a month deployed, against about 311 for the HA design
+- **Speaker notes:** Six services cost more: about 150 dollars a month deployed, against about 310 for the HA design
   with two tasks per service. That is above our 80-dollar budget if left running, so Budgets will warn us and we
   destroy the stack after work sessions. October cost 23 dollars, all credits; 123 dollars of credit is left.
 
@@ -400,11 +412,12 @@ Speaker notes are written for about 130–140 words per minute: 0.50 min ≈ 65�
 
 - **Presenter:** Nai Xin · **Minutes:** 0.50
 - **On slide:**
-  - HA and Multi-AZ RDS are design-only, as the instructor said: a `tfvars` change, ≈ USD 311/month
+  - HA and Multi-AZ RDS are design-only, as the instructor said: a `tfvars` change, ≈ USD 310/month
   - No BI tool (QuickSight blocked on the Free plan); reporting replica design-only; refunds on cancellation are
     only promised in the email, not processed
-  - Concert list not cached at CloudFront (`/api/*` uses `CachingDisabled`); API image still deployed by hand; one
-    task role shared by the six services; scale-out 5.6 min, so pre-scale
+  - Concert list not cached at CloudFront (`/api/*` uses `CachingDisabled`); API rollout still manual; one
+    task role shared by the six services; scale-out 5.5–5.6 min, so pre-scale with a scheduled action before
+    `sale_starts_at`; RDS Proxy before production (130 possible connections vs ≈ 80)
   - Before production: real payments (Stripe), SES production access, HTTPS on the ALB, Cognito MFA, bot protection
 - **Figure:** none (text slide).
 - **Speaker notes:** Some things are deliberately not done. HA is designed and one variable change away; the

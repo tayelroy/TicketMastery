@@ -1,0 +1,147 @@
+name: CI
+
+# Tests the API, both Lambdas and the Terraform on every pull request and every push to main.
+# No AWS credentials: the API's Postgres tests run against a service container, and Terraform is
+# validated with -backend=false. Deploying the API is still manual (docs/deploy.md).
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API typecheck + tests (Postgres 16)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/ticketmastery-api
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          # Throwaway CI database, same values as docker-compose.yml. The tests need this superuser (SET ROLE).
+          POSTGRES_DB: ticketmastery
+          POSTGRES_USER: tm
+          POSTGRES_PASSWORD: tm_local_dev_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U tm -d ticketmastery"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: ticketmastery
+      DB_USER: tm
+      DB_PASSWORD: tm_local_dev_only
+      DB_SSL: "false"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+          cache-dependency-path: services/ticketmastery-api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests with coverage gate
+        run: npm run test:coverage
+
+  ticket-fn:
+    name: ticket-fn typecheck + tests + bundle check
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: lambdas/ticket-fn
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: lambdas/ticket-fn/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Committed bundle is current
+        run: |
+          npm run build
+          git diff --exit-code -- bundle/
+
+  queue-manager:
+    name: queue-manager tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: lambdas/queue-manager
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Tests
+        run: python -m unittest discover -s tests -v
+
+  terraform:
+    name: Terraform fmt + validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+          terraform_wrapper: false
+
+      - name: Format check
+        run: terraform fmt -check -recursive infra
+
+      - name: Init (no backend)
+        run: terraform -chdir=infra/envs/dev init -backend=false -input=false
+
+      - name: Validate
+        run: terraform -chdir=infra/envs/dev validate

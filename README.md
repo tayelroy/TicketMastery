@@ -90,7 +90,7 @@ AWS (ECS Fargate, RDS PostgreSQL, DynamoDB, Lambda, SQS, SNS, SES, S3, Cognito, 
 ├── lambdas/                    queue-manager (UC3, Python), ticket-fn (UC4, Node.js)
 ├── loadtest/                   k6 scripts and drills that produce the NFR evidence
 ├── docs/                       architecture, deploy guide, cost estimate, reporting, final report (docs/report/)
-├── .github/                    CODEOWNERS, PR template, frontend CI + deploy workflows
+├── .github/                    CODEOWNERS, PR template, CI (API + Postgres, Lambdas, Terraform), frontend CI + deploy workflows
 └── CONTRIBUTING.md             workflow, ownership, how to add routes / tables / Terraform
 ```
 

@@ -177,7 +177,7 @@ def draw(ha):
     s.arrow([mid(tfn, "b"), mid(ses, "t")], dashed=True)
 
     s.group(rx, 570, 350, 165, "Operations", OPS)
-    cw = s.node(rx + 15, 605, 155, 60, ["CloudWatch", "30 alarms, dashboard"])
+    cw = s.node(rx + 15, 605, 155, 60, ["CloudWatch", "31 alarms, dashboard"])
     alerts = s.node(rx + 180, 605, 155, 60, ["SNS alerts", "-> team email"])
     bud = s.node(rx + 15, 675, 155, 50, ["AWS Budgets", "USD 80, 4 alerts"])
     s.arrow([mid(cw, "r"), mid(alerts, "l")])
@@ -253,7 +253,7 @@ def draw(ha):
     notes.append("reporting: DB login reporting_ro, read-only, views only.")
     for i, n in enumerate(notes):
         s.text(20, 500 + i * 22, n, 15)
-    s.text(20, 628, "Cost, whole stack (estimate): " + ("≈ USD 311/month" if ha else "≈ USD 150/month"), 15)
+    s.text(20, 628, "Cost, whole stack (estimate): " + ("≈ USD 310/month" if ha else "≈ USD 150/month"), 15)
     s.text(20, 652, "QuickSight removed: not available on the AWS Free plan.", 14)
     s.text(20, 690, "Solid: request path. Dashed: async, egress", 14, italic=True)
     s.text(20, 710, "or optional. Dashed box: design only.", 14, italic=True)
