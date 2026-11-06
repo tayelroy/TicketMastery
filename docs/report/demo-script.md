@@ -162,7 +162,8 @@ one session per browser profile).
 
 ### 2b. UC5: sales reports (1:40–2:00)
 
-- **Do:** Organiser profile → header "Organiser" → **"Sales reports"** (`/organiser/reports`); range **"Last 7 days"**.
+- **Do:** Organiser profile → header "Organiser" → **"Reports"** button (opens the "Sales reports" page,
+  `/organiser/reports`); range **"Last 7 days"**.
 - **Audience sees:** KPI cards (gross revenue, tickets, orders, average order), the revenue-by-day chart, revenue by
   concert, ticket types, seat status and recent orders, each with a CSV download.
 - **Say (Elroy):** this page is served by its own ECS service, `reporting`. It logs in to the database as
@@ -238,8 +239,7 @@ one session per browser profile).
 - **Say (Shi Hui):** the seats became sold and the order confirmed in one transaction. The API then published
   OrderConfirmed to SNS; SQS hands it to the ticket-fn Lambda, which renders the PDF to S3 and emails it through
   SES, so checkout never waits for the email.
-- **Do not click "More concerts"**: it links to `/concerts`, which has no route and shows the 404 page "This show
-  isn't on the lineup".
+- **"More concerts"** links to `/` (the concert list); there is no need to click it, go straight to My Tickets.
 - **Optional, only if ahead of time (≈ 30 s), before paying:** tick "Simulate a declined payment (demo)" →
   "Pay $184.00" → the notice "Payment was declined and your seats were released. Please select again." and the seat
   map reloads. Select the seats again → "Checkout" → **untick the box** (it stays ticked after the decline) →

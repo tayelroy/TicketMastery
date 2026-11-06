@@ -60,7 +60,7 @@ db_skip_final_snapshot     = true
 
 # ------------------------------------------------------------------------------
 # HA / target design (for the diagram and report; NOT deployed by default).
-# Costs roughly USD 190/month instead of ~69 (docs/cost-estimate.md).
+# Whole stack ≈ USD 310/month instead of ≈ 150 for the implementation (estimates, docs/cost-estimate.md).
 # Uncomment to replace the matching lines above:
 #
 # tasks_in_public_subnets    = false # tasks in private subnets, no public IP
@@ -70,7 +70,9 @@ db_skip_final_snapshot     = true
 # # ...or, instead of NAT: enable_vpc_endpoints = true (keep enable_gateway_endpoints = true)
 # enable_autoscaling         = true
 # autoscaling_min_capacity   = 2     # never scale in below one task per AZ
-# autoscaling_max_capacity   = 4     # or more
+# autoscaling_max_capacity   = 4     # NOTE: only a fallback; each ecs_services entry sets its own autoscaling_max
+# #                                    (3 or 2), which wins. With min 2, account/organiser/reporting (max 2) could
+# #                                    not scale: copy the ecs_services default and raise autoscaling_max (e.g. 4).
 # desired_count              = 2     # at least one task per AZ
 # db_multi_az                = true  # synchronous standby in AZ b; AZ pin is dropped automatically
 # db_deletion_protection     = true

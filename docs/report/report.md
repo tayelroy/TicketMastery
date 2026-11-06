@@ -46,18 +46,19 @@ seats and orders.
 The report presents two designs, both built from the same Terraform; a block of variables switches between them:
 
 - **Target high-availability (HA) design:** two AZs, private subnets with a NAT gateway per AZ, at least 2 tasks per
-  service, Multi-AZ RDS; ≈ USD 311/month for the whole stack.
+  service, Multi-AZ RDS; ≈ USD 310/month for the whole stack.
 - **Implementation mode:** what the instructor asked us to deploy at the proposal review. One AZ, no NAT gateway,
-  one task per service, single-AZ RDS; ≈ USD 150/month for the whole stack (≈ 137 of it the base stack).
+  one task per service, single-AZ RDS; ≈ USD 150/month for the whole stack (≈ 136 of it the base stack).
 
 Section 3 shows both diagrams. Section 7 says which availability targets are therefore design-only.
 
 Operations are managed as code:
 
 - Terraform modules with shared S3 remote state and locking;
-- a GitHub Actions deploy for the frontend over OIDC;
+- GitHub Actions CI on every pull request and push to `main` (API type-check and tests against Postgres 16 with a
+  coverage gate, `ticket-fn` tests, `terraform fmt`/`validate`), and a frontend deploy over OIDC;
 - review routed by CODEOWNERS;
-- 30 CloudWatch alarms and a dashboard, alerting by email through SNS;
+- 31 CloudWatch alarms and a dashboard, alerting by email through SNS;
 - AWS Budgets at USD 20/40/60/80;
 - k6 tests and failure drills for every NFR.
 
@@ -101,6 +102,13 @@ Load assumptions for one major on-sale (Google Doc):
 |---|---|---|
 | Normal day | ≈ 5,000 | CloudFront for static content; ALB and the minimum number of tasks for the API |
 | First 10 minutes of a major on-sale | 50,000–100,000 | The waiting room queues them, CloudFront serves the waiting page, and 500 per concert are admitted each minute |
+
+**Capacity math.** 100,000 waiting fans polling `GET /status` every 5 s is ≈ 20,000 req/s, and `/join` alone at
+the 100 rps stage throttle takes ≈ 1,000 s for 100,000 fans. Today the excess gets `429`; a fan keeps their place in
+DynamoDB and the page simply polls again. For production: per-route throttles, `429` + `Retry-After` with jittered
+backoff in the page, an API Gateway quota raised before each on-sale, and `/status` served through CloudFront with a
+≈ 5 s TTL. NFR-1's 10 req/s baseline assumes the ≈ 5,000 normal-day users are mostly served static content by
+CloudFront; the 10× test (100 req/s) is capped by that same throttle, so it proves the stack up to the throttle.
 
 ## 2.3 Use cases and functional requirements
 
@@ -193,7 +201,7 @@ makes that acceptable, because it caps how many buyers reach the API.
 ## 3.3 Implementation mode (deployed)
 
 At the proposal review the instructor asked us to **skip the NAT gateway, use one AZ and not implement HA, but still
-show the HA design**. The Terraform defaults build exactly that.
+show the HA design**. The Terraform defaults build exactly that (Figure 2).
 
 ![Deployed implementation (drawn by `figures/architecture.py`).](figures/implementation-architecture.svg){width=100%}
 
@@ -203,7 +211,7 @@ show the HA design**. The Terraform defaults build exactly that.
 | Task egress | Own public IP via the internet gateway | NAT per AZ or interface endpoints | `enable_nat_gateway`, `single_nat_gateway`, `enable_vpc_endpoints` |
 | Tasks / scaling | 6 services × 1 task, autoscaling per service (max 2–3) | 6 services × ≥ 2 tasks, autoscaling per service | `ecs_services`, `desired_count`, `enable_autoscaling`, `autoscaling_*_capacity` |
 | Database | Single-AZ, pinned to AZ a, 1-day backups | Multi-AZ, 7-day backups, deletion protection | `db_multi_az`, `db_backup_retention_period`, `db_deletion_protection` |
-| Cost (estimate, whole stack) | ≈ USD 150/month | ≈ USD 311/month | `docs/cost-estimate.md` |
+| Cost (estimate, whole stack) | ≈ USD 150/month | ≈ USD 310/month | `docs/cost-estimate.md` |
 
 - **The tasks' public IPs are not an open door.** The task security group has one ingress rule: the container port,
   from the ALB security group. RDS stays private (`publicly_accessible = false`).
@@ -229,17 +237,17 @@ The table sizes the implementation mode. Prices are on-demand list prices for ap
 | Identity | Cognito user pool, `organisers` group, email verification | Managed sign-in; JWTs that API Gateway validates | free tier |
 | API front door | API Gateway HTTP API, JWT authorizer, VPC link, throttle 100 rps / 200 burst | Central API management (instructor feedback a). Auth before compute. An HTTP API's VPC link targets an ALB directly; a REST API would need an extra NLB (≈ 18+). The throttle is sized to protect one 0.25 vCPU task | per request |
 | Load balancer | Internal ALB, health check `/health` (runs DB `SELECT 1`) | Spreads requests over tasks and AZs; takes unhealthy tasks out | 24.2 |
-| Compute | Fargate, 6 services × 1 task, each 0.25 vCPU / 0.5 GB, x86_64; per service a target group, ALB path rule and autoscaling (CPU 60%, 500 requests per task per minute; max 2–3) | No servers to patch; per-second billing. Each use case scales and deploys on its own (feedback b). Smallest size; the burst test checks scale-out | 6 × 11.3 = 67.8 |
+| Compute | Fargate, 6 services × 1 task, each 0.25 vCPU / 0.5 GB, x86_64; per service a target group, ALB path rule and autoscaling (CPU 60%, 500 requests per task per minute; max 2–3) | No servers to patch; per-second billing. Each use case scales and deploys on its own (feedback b). Sizing: one task served ≈ 60 req/s (NFR-2), so 3 tasks cover the 100 rps throttle for a hot service. x86 because the image is built for amd64 (ARM64 ≈ 20% cheaper: future). No Fargate Spot: an interrupted task mid-on-sale costs sales (Spot is possible for reporting) | 6 × 11.2 = 67.2 |
 | Public IPv4 | 1 per task, 6 (the ALB is internal, so it has none) | Replaces a NAT gateway (≈ 43 per AZ) | 6 × 3.65 = 21.9 |
 | Database | RDS PostgreSQL 16 `db.t4g.micro`, 20 GB gp3, encrypted, single-AZ | Transactions for zero double-booking; relational reporting. Smallest Graviton class | 18.3 + 2.8 |
-| Secrets, registry, logs | Secrets Manager (RDS-managed master secret; `reporting_ro` secret); ECR (scan on push, keep 10 images); CloudWatch Logs (14 days) | No password in code or state; private images; central logs | 0.8 + 0.1 + ≈ 1 |
+| Secrets, registry, logs | Secrets Manager (RDS-managed master secret; `reporting_ro` secret); ECR (scan on push, keep 10 images); CloudWatch Logs (14 days) | No password in code or state; private images; central logs | 0.8 + 0.1 + 0.9 = 1.8 |
 | Waiting room | SQS FIFO `join-queue` (DLQ after 3 tries); DynamoDB `live-queue` (on-demand, TTL); `queue-manager` (128 MB, 30 s, SQS batch 10); Scheduler `rate(1 minute)` | FIFO keeps arrival order per concert. DynamoDB scales with the spike without loading RDS. 43,800 runs/month fit the Scheduler (14 M) and Lambda (1 M) free tiers | ≈ 0 |
 | E-tickets | SNS → SQS `ticket-queue` (visibility 6 × the 60 s timeout, DLQ after 5, DLQ kept 14 days) → `ticket-fn` (Node.js 22 arm64, 256 MB, batch 10, max concurrency 2) → private S3 + SES | Checkout doesn't wait for the PDF or the email. Concurrency 2 respects the SES sandbox rate of 1 email/s | ≈ 0 |
-| Monitoring | 30 alarms (43 alarm metrics); 1 dashboard (19 graphs, 63 metrics); 4 custom metrics; SNS email; Budgets | Section 8 | ≈ 6.3 (33 billable alarm metrics × 0.10 + 3 for a dashboard over 50 metrics) |
-| **Whole stack** | | | **≈ 150** (≈ 137 base stack + WAF 7 + monitoring ≈ 6.3 + pay-per-request ≈ 0.3; ≈ 4.9/day) |
+| Monitoring | 31 alarms (44 alarm metrics); 1 dashboard (19 graphs, 63 metrics); 4 custom metrics; SNS email; Budgets | Section 8 | ≈ 6.4 (34 billable alarm metrics × 0.10 + 3 for a dashboard over 50 metrics) |
+| **Whole stack** | | | **≈ 150** (136.2 base stack + WAF 7 + monitoring 6.4 + pay-per-request ≈ 0.3 = 149.9; ≈ 4.9/day) |
 
-The target HA design is **≈ USD 311/month** (≈ 10.2/day; Appendix B). The extra cost is two NAT gateways with their
-Elastic IPs (≈ 94), Multi-AZ RDS (≈ +21) and a second task per service (6 × 11.3 ≈ +68), minus the six public IPs
+The target HA design is **≈ USD 310/month** (≈ 10.2/day; Appendix B). The extra cost is two NAT gateways with their
+Elastic IPs (≈ 94), Multi-AZ RDS (≈ +21) and a second task per service (6 × 11.2 ≈ +67), minus the six public IPs
 (≈ −22).
 
 Alternatives we rejected:
@@ -263,6 +271,8 @@ Alternatives we rejected:
 | UC4 | `POST /api/checkout/holds` → `checkout` → DynamoDB `GetItem` (admitted?) → RDS transaction. `…/confirm` → RDS transaction → SNS `order-events` → SQS `ticket-queue` → `ticket-fn` → Cognito `AdminGetUser` (email) → S3 PDF → SES → S3 `.sent` marker |
 | UC5 | Organiser → API Gateway (JWT) → `organiser` (checks the `organisers` group) → RDS; the dashboard is polled every 5 s. Reports: `/api/reports/*` → `reporting` (DB login `reporting_ro`) → the `report_*` views |
 
+Figure 3 traces one purchase through the waiting-room and checkout services to the e-ticket email.
+
 ![On-sale purchase sequence (source `figures/purchase-sequence.mmd`).](figures/purchase-sequence.png)
 
 ## 5.2 Events
@@ -277,8 +287,9 @@ Alternatives we rejected:
 
 ## 5.3 IAM
 
-Each component has its own role with least-privilege inline policies. The module that owns a resource also grants
-the API task role access to it, so permissions sit next to the resource.
+`queue-manager`, `ticket-fn`, the Scheduler and GitHub Actions each have their own role with least-privilege inline
+policies; the six API services still share one task role (a gap, Section 9.5). The module that owns a resource
+grants that task role access to it, so permissions sit next to the resource.
 
 | Principal | Allowed | Granted in |
 |---|---|---|
@@ -286,7 +297,7 @@ the API task role access to it, so permissions sit next to the resource.
 | API task role (shared by the six services) | `sqs:SendMessage` on `join-queue`; `dynamodb:GetItem` on `live-queue` (status and the admission check); `sns:Publish` on `order-events`; `s3:GetObject` on `tickets/*` + `s3:ListBucket`, so a missing PDF answers 404 rather than 403; `ssmmessages:*` for ECS Exec | `waiting-room`, `messaging`, `ecs-service` |
 | `queue-manager` | Receive and delete on `join-queue`; `GetItem/PutItem/UpdateItem/Query` on `live-queue` and its indexes; VPC ENIs; logs | `waiting-room` |
 | Scheduler role | `lambda:InvokeFunction` on `queue-manager` only | `waiting-room` |
-| `ticket-fn` | Receive and delete on `ticket-queue`; S3 get/put on `tickets/*` + list; `ses:SendEmail` with the condition `ses:FromAddress` = the sender; `cognito-idp:AdminGetUser` on the pool; its log group | `messaging` |
+| `ticket-fn` | Receive and delete on `ticket-queue`; S3 get/put on `tickets/*` + list; `ses:SendEmail` and `ses:SendRawEmail` with the condition `ses:FromAddress` = the sender; `cognito-idp:AdminGetUser` on the pool; its log group | `messaging` |
 | GitHub Actions | OIDC, `main` branch only: list/put/delete in the frontend bucket, `CreateInvalidation` on the distribution | `github-deploy` |
 
 ## 5.4 Network
@@ -470,9 +481,9 @@ verified, which is why the Lambda's maximum concurrency is 2. Production access 
 | Waiting room | 500 admissions per concert per minute; 15-minute admission | Turns a 50,000–100,000-fan spike into a bounded stream of buyers |
 | API Gateway throttle | 100 rps steady, 200 burst | Sheds excess with `429` before it reaches the tasks |
 | WAF rate rule | 2,000 requests / 5 min per IP | Stops single-source floods and simple bots |
-| ECS autoscaling | Per service: target tracking on CPU 60% and 500 ALB requests per task per minute; dev max 2–3 per service, target design min 2. Measured scale-out: 4–5 min (one service, 31 Oct), 5.6 min (discovery, 6 Nov) | Adds tasks only to the use case under load and removes them afterwards. Too slow alone for a spike that starts from one task (Section 10), so on-sales need pre-scaling (Section 12) |
+| ECS autoscaling | Per service: target tracking on CPU 60% and 500 ALB requests per task per minute; dev max 2–3 per service, target design min 2. Measured scale-out (decided / running): 3.9 / 4.2 min and 4.7 / 5.5 min (one service, 1 Nov), 4.7 / 5.6 min (discovery, 6 Nov) | Adds tasks only to the use case under load and removes them afterwards. Too slow alone for a spike that starts from one task (Section 10), so on-sales need pre-scaling (Section 12) |
 | DynamoDB, SQS, SNS, Lambda | On-demand, per request | Nothing to provision on the parts that face the spike |
-| RDS | `db.t4g.micro`; `DB_POOL_MAX` 10 per task (4 for reporting); ≈ 80 `max_connections` | The five master-login services at their maximums (13 tasks) could open 130 connections, above the limit; the connections alarm warns first. Next steps: a larger class or smaller pools, then a read replica for reporting |
+| RDS | `db.t4g.micro`; `DB_POOL_MAX` 10 per task (4 for reporting); ≈ 80 `max_connections` | The five master-login services at their maximums (13 tasks) could open 130 connections, above the limit; the connections alarm warns first. Mitigation before production: RDS Proxy in front of the database (pools multiplexed onto few connections), or smaller pools / a larger class; then a read replica for reporting |
 
 ## 7.2 Availability: target vs implementation
 
@@ -487,12 +498,14 @@ verified, which is why the Lambda's maximum concurrency is 2. Production access 
 
 NFR-5 (99.9%, survive an AZ loss) is therefore a target-design claim. In implementation mode, accepted by the
 instructor, AZ a is a single point of failure for the API and the database. CloudFront, API Gateway, the ALB, S3,
-DynamoDB, SQS, SNS and Lambda are regional or global managed services and stay multi-AZ in both modes.
+DynamoDB, SQS, SNS and Lambda are regional or global managed services and stay multi-AZ in both modes. The error
+budget of 99.9% is 43.8 min/month; one task-loss outage (76 s, drill F1) uses ≈ 3% of it.
 
 # 8. Monitoring and alerts
 
-Monitoring is a Terraform module, `infra/modules/monitoring`: **29 alarms** (plus the messaging module's
-`ticket-dlq-not-empty`, **30** in total, all OK on 6 Nov; `evidence/cloudwatch-alarms.md`), one dashboard, the SNS
+Monitoring is a Terraform module, `infra/modules/monitoring`: **30 alarms** (plus the messaging module's
+`ticket-dlq-not-empty`, **31** in total, all OK after the 7 Nov end-to-end pass; `evidence/cloudwatch-alarms.md`),
+one dashboard, the SNS
 topic `alerts` with an email subscription to `tayelroy@gmail.com`, and an AWS Budgets budget. Every alarm sends both
 its ALARM and OK transitions. In the table, *N × 1 min* means N consecutive one-minute datapoints must all breach;
 *× 6* means one alarm per ECS service.
@@ -511,6 +524,7 @@ its ALARM and OK transitions. In the table, *N × 1 min* means N consecutive one
 | Gateway latency | API Gateway `Latency` p95 | > 500 ms | 3 × 1 min | API latency (ALB budget + authorizer + VPC link) |
 | E-ticket backlog | `ticket-queue` `ApproximateAgeOfOldestMessage` | > 60 s | 1 min | E-ticket backlog / NFR-7 |
 | E-ticket failures | `ticket-dlq` visible messages (messaging module) | > 0 | — | E-ticket backlog / NFR-7 |
+| E-ticket latency | `TicketMastery/ETicketDeliveryLatency` p95 (EMF) | > 60,000 ms | 5 min | NFR-7 |
 | Waiting-room DLQ | `join-queue-dlq.fifo` visible messages | > 0 | 5 min | Fans who never got a position |
 | Lambda errors / throttles | `Errors`, `Throttles` sum, per function (`queue-manager`, `ticket-fn`) | > 0 | 5 min | Application health |
 | Waiting-room size | `TicketMastery/WaitingRoomSize` max (EMF) | > 20,000 | 1 min | Waiting room size / NFR-6 |
@@ -536,13 +550,22 @@ Per-service CPU, memory and unhealthy-host alarms were dropped as noise (a first
 
 **Alerts in practice.** During NFR-2 run 1 (Section 10) the alarms did their job without being forced: the API
 Gateway 5xx-rate alarm fired 2 min 40 s after the ramp started (about a minute after the first failed requests),
-followed by API Gateway p95 latency, ALB 5xx rate and ALB p95 latency; all four returned to OK within 4–6 minutes of
-the scale-out, and `ecs-at-max-capacity` then fired because the service sat at its maximum. The F1 drill raised the
-API Gateway 5xx alarm again, and that email arrived. For an end-to-end check we also forced
-`ticketmastery-dev-join-dlq-not-empty` into `ALARM` with `aws cloudwatch set-alarm-state`: SNS delivered the ALARM
-and the following OK email within the same minute, with 0 failed notifications. (The email subscription was confirmed
-only after the burst runs, so those alarms reached SNS but not the inbox; `evidence/monitoring-alerts.md`.) In NFR-2
-run 3, on the split stack, only `discovery-ecs-at-max-capacity` fired, naming the one service under load.
+followed by API Gateway p95 latency, ALB 5xx rate and ALB p95 latency; all four returned to OK ≈ 3–8 minutes after
+the scale-out decision (ALB 5xx last, at 03:17:49), and `ecs-at-max-capacity` then fired because the service sat at
+its maximum. The F1 drill raised the API Gateway 5xx alarm again, and that email arrived. For an end-to-end check we
+also forced `ticketmastery-dev-join-dlq-not-empty` into `ALARM` with `aws cloudwatch set-alarm-state`: SNS delivered
+the ALARM (09:29:54) and OK (09:30:40) emails 46 s apart, with 0 failed notifications. (The email subscription was
+confirmed only after the burst runs, so those alarms reached SNS but not the inbox; `evidence/monitoring-alerts.md`.)
+In NFR-2 run 3, on the split stack, only `discovery-ecs-at-max-capacity` fired, naming the one service under load.
+
+**Runbook.** Alerts go to one team inbox today; a 429/throttle alarm and an on-call rota are future work.
+
+| Alarm | First action | Owner |
+|---|---|---|
+| Service down, ALB/API Gateway 5xx or p95 | ECS events and target health; roll back the task definition if a deploy is in flight | Elroy |
+| `ecs-at-max-capacity`, DB connections/CPU | Raise the service's min/max in `tfvars` (targeted apply); check `pg_stat_activity` | Elroy |
+| `ticket-dlq-not-empty`, e-ticket age/latency | Read `ticket-fn` logs, fix, re-drive the DLQ (already-sent orders are skipped) | Shi Hui |
+| `join-queue` DLQ, waiting-room size | Read `queue-manager` logs; re-drive; check the admit schedule is enabled | Yan Ting |
 
 # 9. Management approach
 
@@ -554,7 +577,7 @@ per area, each owned by one person:
 | Module | Owner |
 |---|---|
 | `network`, `security`, `ecr`, `rds`, `ecs-service`, `github-deploy`, `monitoring` | Elroy |
-| `edge` | Cody |
+| `edge` (and the `deploy-frontend.yml` workflow) | Cody |
 | `auth-apigw` | Andrew |
 | `waiting-room` | Yan Ting |
 | `messaging` | Shi Hui |
@@ -568,22 +591,24 @@ Conventions every module follows:
 - secrets are read from Secrets Manager at runtime.
 
 **State and safety.** State lives in S3 (`ticketmastery-tfstate-000246635159`, versioned) with S3-native locking, so
-only one apply runs at a time. One `tfvars` block switches between the implementation and HA modes. `check` blocks
-and preconditions reject invalid combinations, for example private-subnet tasks without egress, or a VPC link to a
-public ALB. Every change is `plan -out` → review → `apply` of that plan, announced to the team first.
+only one apply runs at a time. One `tfvars` block switches between the implementation and HA modes. Preconditions
+on the RDS, ECS and API Gateway resources stop a run on invalid settings; `check` blocks warn (without failing) on
+risky combinations such as private-subnet tasks without egress or a VPC link to a public ALB. Every change is
+`plan -out` → review → `apply` of that plan, announced to the team first.
 
 ## 9.2 CI/CD and operations
 
-- **Frontend CI** (`frontend.yml`) type-checks and builds on pull requests.
+- **CI** (`ci.yml`, on pull requests and pushes to `main`): API type-check and tests against a Postgres 16 service
+  with the coverage gate (100% for `src/auth`, `src/config.ts`, `src/modules/account`), `ticket-fn` tests, and
+  `terraform fmt -check` + `validate` (`-backend=false`). `frontend.yml` type-checks and builds the frontend.
 - **Frontend deploy** (`deploy-frontend.yml`) is manual and runs only from `main`. It builds the SPA, syncs it to S3
   and invalidates CloudFront. It authenticates through GitHub OIDC, so no AWS keys are stored in GitHub.
 - **API image:** built for `linux/amd64`, tagged with the git SHA (`4a443fa` on all six services), pushed to ECR
-  (scanned on push), and rolled out by Terraform. The deployment circuit breaker rolls back failures. The cutover from
-  one service to the split caused ≈ 5 min of 503 on dev (the old target group was deleted before the listener
-  switched); a targeted apply fixed it, and later deploys are rolling.
-- **Tests:** the API suite runs against real Postgres (seat-hold race, layout triggers, reporting views and role, auth,
-  admission). Coverage must be 100% for `src/auth`, `src/config.ts` and `src/modules/account`. The Lambdas have their
-  own unit tests.
+  (scanned on push), and rolled out by hand with Terraform; the deployment circuit breaker rolls back failures.
+- **Incident: cutover 503.** Moving from one service to six gave ≈ 5 min of 503 on dev. Cause: the old target group
+  was deleted before the listener switched. Fix: a targeted apply. Prevention: create new target groups and rules
+  before removing the old ones; later deploys are rolling.
+- **Tests** run against real Postgres (seat-hold race, layout triggers, reporting views and role, auth, admission).
 - **ECS Exec** (IAM-gated) runs one-off checks inside the VPC, such as the oversell SQL, without a bastion.
 
 ## 9.3 Branching, ownership and review
@@ -600,11 +625,12 @@ public ALB. Every change is `plan -out` → review → `apply` of that plan, ann
 ## 9.4 Cost management
 
 - **Implementation mode by default.** No NAT, one AZ and an internal ALB took the base stack from ≈ USD 110–115 (one
-  NAT, public ALB) to ≈ 62/month; the six-service split (one task each) raised it to ≈ 137 (whole stack ≈ 150).
+  NAT, public ALB) to ≈ 62/month; the six-service split (one task each) raised it to ≈ 136 (whole stack ≈ 150).
 - **Teardown.** `terraform destroy` after demos and work sessions; recreating the stack takes about 15 minutes.
 - **Budgets.** Alerts on actual spend at USD 20/40/60/80, and on a forecast above USD 80 (NFR-11). At ≈ 4.9/day a
   full month would pass USD 80, so the forecast alert will fire; actual November spend stays under it because the
-  stack is destroyed after 10 Nov: ≈ 6 days × 2.4 + ≈ 4 days × 4.9 ≈ **USD 34** (estimate).
+  stack is destroyed after 10 Nov: ≈ 6 days × 2.5 + ≈ 4 days × 4.9 ≈ **USD 35** (estimate). Total project spend
+  (NFR-11): October 22.92 + November ≈ 35 ≈ **USD 58** (estimate), under 80.
 - **Schedule.** The admit schedule costs ≈ USD 0 always on (free tiers). It can still be paused, or limited to start
   and end dates (instructor feedback d).
 - **Pay per request** for everything idle between on-sales: waiting room, e-tickets and API Gateway.
@@ -634,6 +660,8 @@ The largest items match the estimate's order: ALB 8.26, RDS 6.21, Fargate 3.34, 
 - **One task role is shared by all six services,** so each service can reach the queues and buckets of the others.
 - **Deletion protection is off,** so `terraform destroy` works.
 - **SES is in the sandbox.**
+- **DB TLS without server-certificate verification** (`pool.ts`): encrypted, but not protected against an
+  impersonated endpoint inside the VPC; production loads the RDS CA bundle.
 
 ## 9.6 Backup, disaster recovery, RPO and RTO
 
@@ -672,17 +700,17 @@ Singapore, and the ALB's `TargetResponseTime` gives the server-side share.
 
 | NFR | Method | Result (on the deployed stack, 31 Oct–1 Nov 2026 unless marked 6 Nov) | Pass? |
 |---|---|---|---|
-| NFR-1 | 10 req/s for 5 min of list / detail / seat map | 3,000 requests, 0 errors; k6 **p95 30 ms, p99 43 ms** (seat map p95 35 ms); ALB p95 11 ms, p99 20 ms; CPU ≤ 15% | Pass |
-| NFR-2 | 10 → 100 req/s (10×) in 1 min, held 10 min. Run 1: 1 task, max 3 (implementation). Run 2: min 2, max 4 (target design) | Run 1: **2,153 of 64,964 requests failed (3.3%)** in the 4 min before scale-out: one 0.25 vCPU task hit 94% CPU at ≈ 60 req/s, its `/health` timed out and ECS replaced it; 1 → 3 tasks at 3.9 min, then 0 errors. Run 2: **0 of 69,601 failed**, 0 throttled, k6 p95 31 ms, CPU ≤ 54%; 2 → 4 tasks decided at 4.7 min, running at 5.3 min (Figure 4) | Run 1 fail; run 2 pass on errors, 5.3 vs 5 min scale-out |
-| NFR-2 run 3 (6 Nov) | Same 10 → 100 req/s browse burst on the six-service stack, 1 task per service | 57,600 requests, **0 dropped, 0 throttled**; k6 p95 63 ms (peak phase 71 ms), p99 179 ms. **Only discovery scaled**: 1 → 3 tasks decided at 4.7 min, running at 5.6 min; the other four API services stayed at 1 task | Pass on errors; 5.6 vs 5 min scale-out |
+| NFR-1 | 10 req/s for 5 min of list / detail / seat map | 3,000 requests, 0 errors; k6 **p95 30 ms, p99 43 ms** (seat map p95 35 ms); ALB p95 11 ms, p99 20 ms; CPU ≤ 15.4% | Pass |
+| NFR-2 | 10 → 100 req/s (10×) in 1 min, held 10 min. Run 1: 1 task, max 3 (implementation). Run 2: min 2, max 4 (the target design's two-task floor) | Run 1: **2,153 of 64,964 requests failed (3.3%)** in the 4 min before scale-out: one 0.25 vCPU task hit 94% CPU at ≈ 60 req/s, its `/health` failed (503) and ECS replaced it; 1 → 3 tasks decided at 3.9 min, running at 4.2 min, then 0 errors. Run 2: **0 of 69,601 failed**, 0 throttled, k6 p95 31 ms, CPU ≤ 54%; 2 → 4 tasks decided at 4.7 min, running at 5.5 min (Figure 4) | Run 1 fail; run 2 pass on errors, 5.5 vs 5 min scale-out |
+| NFR-2 run 3 (6 Nov) | Same 10 → 100 req/s ramp with an 8-min peak, on the six-service stack, 1 task per service | 57,600 requests, **0 dropped, 0 throttled**; k6 p95 63 ms (peak phase 71 ms), p99 179 ms. **Only discovery scaled**: 1 → 3 tasks decided at 4.7 min, running at 5.6 min; the other four API services stayed at 1 task | Pass on errors; 5.6 vs 5 min scale-out |
 | NFR-3 | 100 admitted fans race for 20 seats (2 per hold, 10% of payments declined), twice; then SQL inside the VPC (ECS Exec) | 299 hold attempts, **278 lost races (409)**, 20 orders for 40 seats, 1 declined seat re-sold, 0 server errors. SQL: **0 seats in two confirmed orders**, 0 sold seats without an order, per concert and for the whole database | Pass |
 | NFR-4 | Hold a seat, poll the seat map every 2 s around expiry, re-hold, pay late | Available **0.6 s** after expiry; fan B re-held it (`201`); fan A's late payment `409 hold_expired` | Pass (≤ 30 s) |
 | NFR-5 | F1: `ecs stop-task` on the only task (single-service stack); `/health` polled every second | Replacement started at +54 s, healthy at +82 s; **outage 76 s**. With two tasks the ALB routes around a lost task; AZ loss is design only | Pass (≤ 5 min) |
-| NFR-6 | 20 fans join 200 ms apart before the sale; admit batch lowered to 5 for this run, then restored to 500 | Positions 1–20 = join order; **4 admit runs** one minute apart; **0 inversions** in position or admission | Pass |
+| NFR-6 | 20 fans join ≈ 236 ms apart on average before the sale; admit batch lowered to 5 for this run, then restored to 500 | Positions 1–20 = join order; **4 admit runs** one minute apart; **0 inversions** in position or admission | Pass |
 | NFR-7 | `ticket-fn`'s `deliveryLatencyMs` (SES accepted − order confirmed) over the NFR-3 orders | Run 2: **10/10 emailed within 60 s, p95 9.9 s**. Run 1 exposed an IAM gap (SESv2 raw sends need `ses:SendRawEmail`): all 10 failed once, stayed queued, and were emailed on the retry after the fix; none lost | Pass (after the fix) |
 | NFR-8/9 | F4: point-in-time restore to a new private instance, timed from the RDS event log, then deleted | Restore point **168 s** before the request; database accepting connections after **9 min 14 s** (`available` at 28 min) | Pass |
 | NFR-10 | Read-only configuration checks | RDS private and KMS-encrypted; DB subnets without an internet route; ALB internal; CloudFront and API Gateway HTTPS only; WAF on; S3 and SQS encrypted. VPC link → ALB is HTTP inside the VPC (Section 9.5) | Pass |
-| NFR-11 | Cost Explorer and Budgets | October usage USD 22.92 (USD 0 after credits); budget USD 80 with alerts. November ≈ USD 34 (estimate, stack destroyed after 10 Nov); a full month at ≈ 4.9/day would pass 80 | Pass so far; forecast alert expected |
+| NFR-11 | Cost Explorer and Budgets | October usage USD 22.92 (USD 0 after credits); budget USD 80 with alerts. November ≈ USD 35, total ≈ 58 (estimates, stack destroyed after 10 Nov); a full month at ≈ 4.9/day would pass 80 | Pass so far; forecast alert expected |
 
 Evidence files: `evidence/nfr1-browse.md`, `nfr2-burst-run1.md`, `nfr2-burst-run2.md`, `nfr3-oversell.md`,
 `nfr4-hold-expiry.md`, `nfr5-f1-task-loss.md`, `nfr6-waiting-room.md`, `nfr7-eticket.md`, `nfr8-f4-pitr.md`,
@@ -695,7 +723,7 @@ UTC) starts with one task; run 2 (03:27–03:38 UTC) with two.](evidence/nfr2-bu
 **What NFR-2 taught us.** One 0.25 vCPU task saturates at about 60 req/s. Target tracking needs three one-minute
 datapoints above target before it acts, and a new task needs about 40 s to pass its health check, so scale-out
 takes 4–6 minutes. Run 1 also showed a failure mode: the `/health` check includes a database `SELECT 1`, so when the
-only task was overloaded its health check timed out and ECS replaced it, turning slow responses into errors. With
+only task was overloaded its health check failed (503) and ECS replaced it, turning slow responses into errors. With
 two tasks as the floor (the target design), the same burst caused no errors. Run 3, on the split stack, scaled only
 `discovery`, the service that serves browsing, which is the point of per-feature services. Scale-out
 still took longer than 5 min, so the fixes for production stay, in order: scale out ahead of each announced on-sale
@@ -718,7 +746,10 @@ URL, and an organiser opened the live dashboard (Figure 5; full screenshots in `
 5. UC5: the organiser's concerts and live dashboard (sold 20/1000, revenue SGD 1,000 after the NFR-3 run)
    (`uc5-organiser-concerts.jpg`, `uc5-organiser-dashboard.jpg`);
 6. UC5 reporting: the views on the live database return the same totals (`evidence/uc5-reporting-views.md`); the
-   Sales reports page on the reporting service, 6 Nov (`evidence/demo/demo-18-organiser-reports.png`).
+   Sales reports page on the reporting service, 6 Nov (`evidence/demo/demo-18-organiser-reports.png`);
+7. 7 Nov, six-service stack, real browser on CloudFront: sign-in → waiting room (admitted) → 2-seat hold → payment →
+   e-ticket emailed 3.4 s after payment (`deliveryLatencyMs` 3429), PDF downloaded → dashboard "Sold 2 / 10" → Sales
+   reports (SGD 108, 2 tickets, 1 order) → cancel → notice sent (1 order, 1 published); all 31 alarms OK afterwards.
 
 ![The deployed system on the CloudFront URL (1 Nov 2026).](evidence/functional-walkthrough.jpg){width=80%}
 
@@ -739,57 +770,54 @@ URL, and an organiser opened the live dashboard (Figure 5; full screenshots in `
   subscribing fails until it moves to a paid plan. The reporting service and Sales reports page cover the need
   (Section 6.5); an RDS read replica for reporting is the step at production scale (`docs/reporting.md`).
 - **HA not deployed,** because the instructor asked for the HA design to be shown, not built. AZ-loss tolerance,
-  Multi-AZ RDS and two tasks per service are design-only; turning them on is a `tfvars` change (≈ USD 311/month).
-- **Cost of the split.** Six services at one task each raise the whole stack from ≈ USD 72 to ≈ 150/month (Appendix
-  B), so a full month would pass the USD 80 budget; the stack is destroyed after 10 Nov.
+  Multi-AZ RDS and two tasks per service are design-only; turning them on is a `tfvars` change (≈ USD 310/month).
+  Region-loss and AZ-loss recovery were never exercised.
+- **Cost of the split.** Six services at one task each raise the whole stack from ≈ USD 76 (62 base + 13.7 rest) to
+  ≈ 150/month (Appendix B), so a full month would pass the USD 80 budget; the stack is destroyed after 10 Nov.
 - **Shared task role.** All six services use one task role (Section 5.3). Next step: one least-privilege task role per
   service.
-- **Faster scaling.** Scale-out took 5.3–5.6 min, over the 5 min target (NFR-2 runs 2 and 3): raise each service's
-  minimum on a schedule before an announced on-sale, add step scaling on a high-resolution alarm, and use a liveness
-  check that doesn't fail a busy task (NFR-2 run 1, Section 10).
+- **Faster scaling.** Scale-out took 5.5–5.6 min, over the 5 min target (NFR-2 runs 2 and 3). Pre-scale with an
+  `aws_appautoscaling_scheduled_action` per service that raises the minimum (e.g. to 3) 15 min before
+  `sale_starts_at`; add step scaling on a high-resolution alarm, and use a liveness check that doesn't fail a busy
+  task (NFR-2 run 1, Section 10).
 - **Next steps:** CloudFront caching of `GET /api/concerts*`; an adaptive admit batch; Stripe payments (idempotency
   key, signed webhook); cross-region snapshot copy for region-loss DR (multi-region writes are not justified with 80%
   of customers in Singapore); SES production access with DKIM, HTTPS on the ALB, Cognito MFA, deletion protection and
   7-day backups, WAF Bot Control.
-- **API CI/CD.** The API image is built, pushed and rolled out to the six services by hand (Terraform apply).
+- **API rollout is manual.** CI tests the API, Lambda and Terraform, but the image is built, pushed and rolled out to
+  the six services by hand (Terraform apply); per-service task roles are also still to do.
 
 # Appendix A. API list
 
 | Method and path | Auth | Purpose |
 |---|---|---|
 | `GET /health` | public | Readiness (DB `SELECT 1`), used by the ALB |
-| `GET /api/concerts`, `/api/concerts/:id`, `/api/concerts/:id/seats` | public | List and search; detail with availability; seat map |
-| `GET /api/me`, `/api/me/orders`, `/api/me/tickets/:id` | fan | Identity; confirmed orders; one e-ticket |
-| `GET /api/me/tickets/:id/download` | fan | Pre-signed PDF URL (300 s); `409 ticket_not_ready` until the PDF exists |
+| `GET /api/concerts`, `/:id`, `/:id/seats` | public | List and search; detail with availability; seat map |
+| `GET /api/me`, `/api/me/orders`, `/api/me/tickets/:id`, `…/download` | fan | Identity; orders; one e-ticket; pre-signed PDF URL (300 s), `409 ticket_not_ready` until it exists |
 | `POST /api/waiting-room/:concertId/join`, `GET …/status` | fan | Join the queue; position and state |
-| `GET /api/checkout/concerts/:concertId/seats` | fan | Seat map plus the fan's active hold |
-| `POST /api/checkout/holds` | fan, admitted | Hold 1–20 seats for 10 min; `403 not_admitted`, `409 seats_unavailable` |
-| `DELETE /api/checkout/holds/:holdId` | fan | Release a hold |
+| `GET /api/checkout/concerts/:concertId/seats`; `POST`, `DELETE /api/checkout/holds[/:holdId]` | fan (hold: admitted) | Seat map with own hold; hold 1–20 seats for 10 min (`403 not_admitted`, `409 seats_unavailable`); release |
 | `POST /api/checkout/holds/:holdId/confirm` | fan | Simulated payment; `402 payment_failed`, `409 hold_expired` |
-| `POST`, `GET /api/organiser/concerts`; `GET …/:id` | organiser | Create a draft; list mine; detail with counts |
-| `PUT …/:id/ticket-types`, `PUT …/:id/layout` | organiser | Replace ticket types; replace the layout (one transaction) |
-| `POST …/:id/publish`, `POST …/:id/cancel` | organiser | `draft` → `scheduled`; cancel with a reason |
-| `GET …/:id/dashboard` | organiser | Live counts and revenue |
-| `GET /api/reports/sales` (`days` = 7, 30, 90 or `all`; optional `concertId`) | organiser | Sales reports over the `report_*` views (reporting service, `reporting_ro`) |
+| `POST`, `GET /api/organiser/concerts[/:id]`; `PUT …/ticket-types`, `…/layout`; `POST …/publish`, `…/cancel`; `GET …/dashboard` | organiser | Drafts, lists, detail; replace types and layout; publish, cancel with reason; live counts and revenue |
+| `GET /api/reports/sales` (`days` = 7, 30, 90 or `all`; optional `concertId`) | organiser | Sales reports over the `report_*` views (`reporting_ro`) |
 
 Errors are JSON `{ "error": { "code", "message", "details?" } }`: 400 validation, 401 no user, 403 not allowed or not
 admitted, 404 unknown, 409 conflict.
 
 # Appendix B. Cost tables
 
-Source `docs/cost-estimate.md`: on-demand list prices, USD, ap-southeast-1, 730 h/month, excluding tax; estimates. Single-service stack: ≈ 72/month estimated, USD 2.02–2.26/day measured; October USD 22.92, all credits (`evidence/nfr11-cost.md`).
+Source `docs/cost-estimate.md`: on-demand list prices, USD, ap-southeast-1, 730 h/month, excluding tax; estimates. Single-service stack: ≈ 76/month estimated (62 base + 13.7 rest), USD 2.02–2.26/day measured; October USD 22.92, all credits (`evidence/nfr11-cost.md`).
 
 | Item | Implementation (deployed) | ≈ USD | Target HA (2 tasks per service) | ≈ USD |
 |---|---|---|---|---|
 | NAT gateways + Elastic IPs | none | 0 | 2 + 2 EIPs | 86.5 + 7.3 |
 | ALB (internal) | 1, ~1 LCU | 24.2 | 1 | 24.2 |
-| RDS `db.t4g.micro` | single-AZ | 18.3 | Multi-AZ | 36.6 |
+| RDS `db.t4g.micro` | single-AZ | 18.3 | Multi-AZ | 36.5 |
 | RDS storage 20 GB gp3 | single-AZ | 2.8 | Multi-AZ | 5.5 |
-| Fargate 0.25 vCPU / 0.5 GB (11.3 per task) | 6 services × 1 task | 67.8 | 6 × 2 = 12 tasks, private | 135.6 |
+| Fargate 0.25 vCPU / 0.5 GB (11.2 per task) | 6 services × 1 task | 67.2 | 6 × 2 = 12 tasks, private | 134.4 |
 | Public IPv4 (3.65 each) | 6 tasks | 21.9 | none | 0 |
-| Secrets Manager (2 secrets), Logs, ECR | | ≈ 1.8 | | ≈ 1.9 |
-| **Base stack** | | **≈ 137** (4.5/day) | | **≈ 298** (9.8/day) |
-| WAF (1 ACL, 2 rules) | | ≈ 7 | | ≈ 7 |
-| Monitoring: 33 billable alarm metrics (3.3) + dashboard over 50 metrics (3); pay-per-request ≈ 0.3 | | ≈ 6.6 | | ≈ 6.6 |
-| **Whole stack** | | **≈ 150** (4.9/day) | | **≈ 311** (10.2/day) |
+| Secrets Manager (2 secrets) 0.8, Logs 0.9, ECR 0.1 | | 1.8 | | 1.8 |
+| **Base stack** | | **136.2** (4.5/day) | | **296.2** (9.7/day) |
+| WAF (1 ACL, 2 rules) | | 7 | | 7 |
+| Monitoring: 34 billable alarm metrics (3.4) + dashboard over 50 metrics (3); pay-per-request ≈ 0.3 | | 6.7 | | 6.7 |
+| **Whole stack** | | **≈ 150** (149.9; 4.9/day) | | **≈ 310** (309.9; 10.2/day) |
 

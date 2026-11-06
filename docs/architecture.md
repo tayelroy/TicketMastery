@@ -191,7 +191,7 @@ The base stack is Elroy's: `infra/` (`envs/dev`, `modules/{network,security,ecr,
 | Teammates' modules | Owner | Location |
 |---|---|---|
 | S3 site bucket, CloudFront, WAF (no Route 53: the site uses the CloudFront domain) | Cody | `infra/modules/edge/` |
-| GitHub Actions OIDC deploy role for the frontend workflow | Cody (pipeline), Elroy (module) | `infra/modules/github-deploy/`, `.github/workflows/deploy-frontend.yml` |
+| GitHub Actions OIDC deploy role for the frontend workflow | Elroy (module); Cody (the `deploy-frontend.yml` workflow) | `infra/modules/github-deploy/`, `.github/workflows/deploy-frontend.yml` |
 | Cognito user pool + `organisers` group, API Gateway HTTP API + JWT authorizer + VPC link | Andrew | `infra/modules/auth-apigw/` |
 | SQS FIFO `join-queue` + DLQ, DynamoDB `live-queue`, EventBridge Scheduler admit schedule, `queue-manager` | Yan Ting | `infra/modules/waiting-room/`, `lambdas/queue-manager/` |
 | SNS `order-events`, SQS `ticket-queue` + DLQ, `ticket-fn`, SES sender identity, private e-ticket bucket | Shi Hui | `infra/modules/messaging/`, `lambdas/ticket-fn/` |
