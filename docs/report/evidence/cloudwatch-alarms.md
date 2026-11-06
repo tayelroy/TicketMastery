@@ -1,11 +1,11 @@
-# CloudWatch alarms (live, 6 Nov 2026)
+# CloudWatch alarms (live, 6–7 Nov 2026)
 
 Read from the dev account with `aws cloudwatch describe-alarms --alarm-name-prefix ticketmastery-dev` after the
 API was split into one ECS service per use case (plus a reporting service) and the per-service alarms were trimmed.
-Defined in Terraform: `infra/modules/monitoring/alarms.tf` (29 alarms) and `infra/modules/messaging`
+Defined in Terraform: `infra/modules/monitoring/alarms.tf` (30 alarms) and `infra/modules/messaging`
 (`ticket-dlq-not-empty`).
 
-**30 alarms in total.** Every alarm sends both its ALARM and OK transitions to SNS `ticketmastery-dev-alerts`,
+**31 alarms in total.** Every alarm sends both its ALARM and OK transitions to SNS `ticketmastery-dev-alerts`,
 which emails `tayelroy@gmail.com`.
 
 | Group | Alarms |
@@ -15,12 +15,12 @@ which emails `tayelroy@gmail.com`.
 | API front door and ALB, whole API | 4 |
 | Checkout business metric | 1 |
 | Waiting room (UC3) | 2 |
-| E-tickets (UC4/UC2) | 2 |
+| E-tickets (UC4/UC2) | 3 |
 | Lambda errors and throttles | 4 |
 | Database (RDS) | 3 |
-| **Total** | **30** |
+| **Total** | **31** |
 
-**Why 30 and not 41.** The first version of the split copied all five service alarms for every service (25 for
+**Why 31 and not 41.** The first version of the split copied all five service alarms for every service (25 for
 five services, 41 in total). Three of those copies carried no extra information:
 - **Unhealthy hosts:** with one task per service it fires together with "no healthy hosts", and a partly failing
   service shows up in the 5xx alarms.
@@ -81,12 +81,13 @@ to the API as a whole. The dashboard shows requests per service next to them.
 | `waiting-room-size` | `WaitingRoomSize` (TicketMastery, EMF from `queue-manager`) | Maximum | > 20,000 | 60 s × 1 | Very large queue; admins decide whether to raise the admit batch or the autoscaling max |
 | `join-dlq-not-empty` | `ApproximateNumberOfMessagesVisible` (AWS/SQS, `join-queue-dlq.fifo`) | Maximum | > 0 | 300 s × 1 | Join requests failed repeatedly: those fans never got a queue position |
 
-## 5. E-tickets, UC4/UC2 (2 alarms)
+## 5. E-tickets, UC4/UC2 (3 alarms)
 
 | Alarm | Metric | Statistic | Condition | Period × evaluations | What it means |
 |---|---|---|---|---|---|
 | `ticket-queue-oldest-message` | `ApproximateAgeOfOldestMessage` (AWS/SQS, `ticket-queue`) | Maximum | > 60 s | 60 s × 1 | NFR-7: e-tickets are not going out within a minute |
 | `ticket-dlq-not-empty` | `ApproximateNumberOfMessagesVisible` (AWS/SQS, `ticket-dlq`) | Maximum | > 0 | 300 s × 1 | An e-ticket failed 5 times; re-drive after the fix (safe: sent orders are skipped) |
+| `eticket-delivery-latency` | `ETicketDeliveryLatency` (TicketMastery, EMF from `ticket-fn`, ms) | p95 | > 60,000 ms | 300 s × 1 | NFR-7: e-tickets are going out, but slower than 60 s (added 7 Nov) |
 
 ## 6. Lambda (4 alarms)
 
@@ -110,7 +111,7 @@ open up to 130 connections, above the estimated limit of 80.
 
 ## State when read
 
-All 30 alarms were **OK**. Earlier the same day, with the untrimmed set, the browse burst
+All 30 alarms were **OK** on 6 Nov (the 31st, `eticket-delivery-latency`, was added on 7 Nov). Earlier the same day, with the untrimmed set, the browse burst
 (`loadtest/results/nfr2-burst-aws-20261106T021055Z.md`) put `ticketmastery-dev-discovery-ecs-at-max-capacity` into
 ALARM: discovery scaled from 1 to 3 tasks, its maximum, while account, waiting-room, checkout and organiser stayed at
 1 task each. It returned to OK after discovery scaled back in.

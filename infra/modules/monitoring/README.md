@@ -46,15 +46,16 @@ shows up in the 5xx alarms. API latency and 5xx stay ALB-wide: NFR-1 and the err
 | Gateway errors | `AWS/ApiGateway` `5xx` / `Count` × 100 (ApiId) | > 1 % | 5 min | What fans see at the edge of the API, so it also catches VPC link and no-target errors that the ALB target alarm can't. |
 | Gateway latency | `AWS/ApiGateway` `Latency` p95 (ApiId) | > 500 ms | 3 × 1 min | ALB budget (300 ms) plus the JWT authorizer and VPC link hop. The dashboard shows `IntegrationLatency` next to it to tell the two apart. |
 | E-ticket backlog | `AWS/SQS` `ApproximateAgeOfOldestMessage` max (ticket-queue) | > 60 s | 1 min | E-tickets should arrive within seconds; a minute-old message means ticket-fn is failing or stopped. |
+| E-ticket latency | `TicketMastery` `ETicketDeliveryLatency` p95 (custom, EMF from ticket-fn) | > 60 000 ms | 5 min | NFR-7: 95% of e-tickets within 60 s. Catches a slow but moving pipeline (e.g. SES throttling) that the backlog alarm misses. No data = no sales = OK. |
 | Waiting-room DLQ | `AWS/SQS` `ApproximateNumberOfMessagesVisible` max (`join-queue-dlq.fifo`) | > 0 | 5 min | Each message is a fan whose join request never got a queue position. The ticket-dlq alarm lives in `modules/messaging` and uses this topic through its `alarm_actions`. |
 | Lambda errors | `AWS/Lambda` `Errors` sum, per function (queue-manager, ticket-fn) | > 0 | 5 min | Any error in the waiting room or e-ticket pipeline needs a look; SQS retries hide them from fans until the DLQ fills. |
 | Lambda throttles | `AWS/Lambda` `Throttles` sum, per function | > 0 | 5 min | Throttling delays positions and e-tickets; it means the account concurrency limit or a reserved concurrency is too low. |
 | Waiting-room size | `TicketMastery` `WaitingRoomSize` max (custom, no dimensions) | > 20 000 | 1 min | Proposal threshold: notify, and admins decide whether to raise the admit rate or the API scaling maximum. queue-manager writes it every scheduled run as CloudWatch Embedded Metric Format (it has no NAT, so it can't call `PutMetricData`). No data outside a sale = OK. |
 | Checkout failures | `TicketMastery` `CheckoutPaymentFailures` / `CheckoutPaymentAttempts` × 100 (log metric filters) | > 20 % with ≥ 5 attempts | 5 min | Proposal threshold: one in five payments failing means the payment provider is likely down. The 5-attempt floor stops a single declined card on a quiet day from alerting. |
 
-With the 6 dev services: 15 shared alarms + 2 busiest-service alarms + 1 per service × 6 = 23 in implementation mode,
-29 with autoscaling on (+1 scaling-ceiling alarm per service), plus the ticket-dlq alarm in `modules/messaging` (24 and
-30). Per-service alarms and dashboard lines follow `ecs_services`, so a new service (as `reporting` was) needs no change
+With the 6 dev services: 16 shared alarms + 2 busiest-service alarms + 1 per service × 6 = 24 in implementation mode,
+30 with autoscaling on (+1 scaling-ceiling alarm per service), plus the ticket-dlq alarm in `modules/messaging` (25 and
+31). Per-service alarms and dashboard lines follow `ecs_services`, so a new service (as `reporting` was) needs no change
 here. Before the per-service split it was 19 (20); the first version of the split had one alarm of each kind per
 service (40 with autoscaling), trimmed because per-service CPU, memory and unhealthy-host copies added noise, not signal.
 
