@@ -13,10 +13,8 @@ locals {
       aws_cloudwatch_metric_alarm.alb_latency_p95,
       aws_cloudwatch_metric_alarm.alb_5xx_rate,
     ],
-    [for k in local.service_keys : aws_cloudwatch_metric_alarm.alb_unhealthy_hosts[k]],
     [for k in local.service_keys : aws_cloudwatch_metric_alarm.alb_no_healthy_hosts[k]],
-    [for k in local.service_keys : aws_cloudwatch_metric_alarm.ecs_cpu_high[k]],
-    [for k in local.service_keys : aws_cloudwatch_metric_alarm.ecs_memory_high[k]],
+    [aws_cloudwatch_metric_alarm.ecs_max_utilization["cpu"], aws_cloudwatch_metric_alarm.ecs_max_utilization["memory"]],
     [for k in sort(keys(aws_cloudwatch_metric_alarm.ecs_at_max_capacity)) : aws_cloudwatch_metric_alarm.ecs_at_max_capacity[k]],
     [
       aws_cloudwatch_metric_alarm.rds_cpu_high,
@@ -85,7 +83,7 @@ locals {
         ["AWS/ApplicationELB", "UnHealthyHostCount", "TargetGroup", var.ecs_services[k].target_group_arn_suffix, "LoadBalancer", var.alb_arn_suffix, { stat = "Maximum", label = k }]
       ]
       period      = 60
-      annotations = [{ label = "alarm (> 0)", value = 0 }]
+      annotations = []
       left_label  = "Tasks"
     },
     {

@@ -1,39 +1,48 @@
 # CloudWatch alarms (live, 6 Nov 2026)
 
 Read from the dev account with `aws cloudwatch describe-alarms --alarm-name-prefix ticketmastery-dev` after the
-API was split into one ECS service per use case. Defined in Terraform: `infra/modules/monitoring/alarms.tf`
-(40 alarms) and `infra/modules/messaging` (`ticket-dlq-not-empty`).
+API was split into one ECS service per use case and the per-service alarms were trimmed. Defined in Terraform:
+`infra/modules/monitoring/alarms.tf` (27 alarms) and `infra/modules/messaging` (`ticket-dlq-not-empty`).
 
-**41 alarms in total.** Every alarm sends both its ALARM and OK transitions to SNS `ticketmastery-dev-alerts`,
+**28 alarms in total.** Every alarm sends both its ALARM and OK transitions to SNS `ticketmastery-dev-alerts`,
 which emails `tayelroy@gmail.com`.
 
 | Group | Alarms |
 |---|---|
-| Per ECS service: 5 alarms × 5 services (discovery, account, waiting-room, checkout, organiser) | 25 |
+| Per ECS service: service down + scaling ceiling × 5 services (discovery, account, waiting-room, checkout, organiser) | 10 |
+| ECS CPU and memory, busiest service | 2 |
 | API front door and ALB, whole API | 4 |
 | Checkout business metric | 1 |
 | Waiting room (UC3) | 2 |
 | E-tickets (UC4/UC2) | 2 |
 | Lambda errors and throttles | 4 |
 | Database (RDS) | 3 |
-| **Total** | **41** |
+| **Total** | **28** |
+
+**Why 28 and not 41.** The first version of the split copied all five service alarms for every service (25, so 41
+in total). Three of those copies carried no extra information:
+- **Unhealthy hosts:** with one task per service it fires together with "no healthy hosts", and a partly failing
+  service shows up in the 5xx alarms.
+- **CPU and memory:** autoscaling already acts on CPU per service, and the scaling-ceiling alarm names a service
+  that can't scale further.
+
+They were replaced by one alarm each on the busiest service. Per service, only the two alarms that say which use case
+is in trouble remain.
 
 "Period × evaluations" is how long the condition must hold: for example, 60 s × 5 means 5 consecutive one-minute
 datapoints. "Missing data" is how CloudWatch treats a minute with no datapoint.
 
-## 1. Per ECS service (25 alarms)
+## 1. ECS services (12 alarms)
 
-Each of the five services has the same five alarms, named `ticketmastery-dev-<service>-<alarm>`. Because each
-service has its own target group and autoscaling policy, a problem or a scaling ceiling shows up for the affected
-service only.
+Each service has its own target group and autoscaling policy, so "down" and "at its ceiling" are reported for the
+affected service only. Per-service alarms are named `ticketmastery-dev-<service>-<alarm>`.
 
 | Alarm | Metric (namespace) | Statistic | Condition | Period × evaluations | Missing data | What it means |
 |---|---|---|---|---|---|---|
-| `<service>-alb-no-healthy-hosts` | `HealthyHostCount` (AWS/ApplicationELB, per target group) | Minimum | < 1 | 60 s × 2 | breaching | No healthy task: that part of the API is down. Missing data counts as down |
-| `<service>-alb-unhealthy-hosts` | `UnHealthyHostCount` (AWS/ApplicationELB, per target group) | Maximum | > 0 | 60 s × 2 | notBreaching | A task failed the ALB `/health` check (usually the database is unreachable) |
-| `<service>-ecs-cpu-high` | `CPUUtilization` (AWS/ECS, per service) | Average | > 80% | 60 s × 5 | notBreaching | Sustained CPU pressure; raise the task count, the autoscaling max or the task size |
-| `<service>-ecs-memory-high` | `MemoryUtilization` (AWS/ECS, per service) | Average | > 80% | 60 s × 5 | notBreaching | Tasks risk being OOM-killed |
-| `<service>-ecs-at-max-capacity` | `LiveTaskCount` (AWS/ECS, per service) | Minimum | ≥ autoscaling max | 60 s × 5 | notBreaching | The service has been at its scaling ceiling for 5 minutes |
+| `<service>-alb-no-healthy-hosts` (× 5) | `HealthyHostCount` (AWS/ApplicationELB, per target group) | Minimum | < 1 | 60 s × 2 | breaching | No healthy task: that part of the API is down. Missing data counts as down |
+| `<service>-ecs-at-max-capacity` (× 5) | `LiveTaskCount` (AWS/ECS, per service) | Minimum | ≥ autoscaling max | 60 s × 5 | notBreaching | The service has been at its scaling ceiling for 5 minutes |
+| `ecs-max-cpu-high` | Metric math: `MAX` of `CPUUtilization` (AWS/ECS) over the five services | Average | > 80% | 60 s × 5 | notBreaching | The busiest service is short of CPU even with autoscaling; the dashboard (one line per service) shows which |
+| `ecs-max-memory-high` | Metric math: `MAX` of `MemoryUtilization` (AWS/ECS) over the five services | Average | > 80% | 60 s × 5 | notBreaching | Tasks of the busiest service risk being OOM-killed |
 
 Autoscaling maximums, which are also the `at-max-capacity` thresholds:
 
@@ -99,7 +108,7 @@ open up to 130 connections, above the estimated limit of 80.
 
 ## State when read
 
-40 alarms were **OK**. `ticketmastery-dev-discovery-ecs-at-max-capacity` was in **ALARM**: the browse burst run
-just before (`loadtest/results/nfr2-burst-aws-20261106T021055Z.md`) scaled discovery from 1 to 3 tasks, its
-maximum, while account, waiting-room, checkout and organiser stayed at 1 task each. It returns to OK once
-discovery scales back in.
+All 28 alarms were **OK**. Earlier the same day, with the untrimmed set, the browse burst
+(`loadtest/results/nfr2-burst-aws-20261106T021055Z.md`) put `ticketmastery-dev-discovery-ecs-at-max-capacity` into
+ALARM: discovery scaled from 1 to 3 tasks, its maximum, while account, waiting-room, checkout and organiser stayed at
+1 task each. It returned to OK after discovery scaled back in.

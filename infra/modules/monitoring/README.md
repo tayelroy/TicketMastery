@@ -26,19 +26,19 @@ Every alarm sends its `ALARM` and `OK` transitions to the `<name>-alerts` topic.
 *N × 1 min* means N consecutive one-minute datapoints must all breach.
 
 The API runs as one ECS service per use case (`ecs_services`: discovery, account, waiting-room, checkout,
-organiser), each with its own target group. Rows marked **per service** exist once per service, named
-`<name>-<service key>-<alarm>` (e.g. `ticketmastery-dev-checkout-ecs-cpu-high`), so an alert names the use case.
-API latency and 5xx stay ALB-wide: NFR-1 and the error budget are for the API as a whole, and the dashboard shows
-requests per service next to them.
+organiser), each with its own target group. Only the two alarms that say *which* use case is in trouble exist per
+service, named `<name>-<service key>-<alarm>` (e.g. `ticketmastery-dev-checkout-alb-no-healthy-hosts`): service down,
+and scaling ceiling. CPU and memory are one alarm each on the busiest service (metric math `MAX` over the five), and
+the dashboard shows one line per service to find it. A task that fails health checks while another still serves
+shows up in the 5xx alarms. API latency and 5xx stay ALB-wide: NFR-1 and the error budget are for the API as a whole.
 
 | Signal | Metric | Alarm when | Period | Why |
 |---|---|---|---|---|
 | API latency | `AWS/ApplicationELB` `TargetResponseTime` p95 (LoadBalancer) | > 0.3 s | 3 × 1 min | NFR-1: browse and seat-map APIs p95 < 300 ms. Three minutes in a row filters out one slow cold request. |
 | API errors | `HTTPCode_Target_5XX_Count` / `RequestCount` × 100 (metric math) | > 1 % | 5 min | A rate, not a count: a fixed count is noise at demo traffic and too late at on-sale traffic. No requests = no data = OK. |
-| Task health (per service) | `UnHealthyHostCount` max (TargetGroup) | > 0 | 2 × 1 min | A task failing `/health` (it checks the DB) for two minutes is a real fault, not a deploy blip (the ALB needs 3 × 30 s failures to mark it). |
 | Service down (per service) | `HealthyHostCount` min (TargetGroup) | < 1 | 2 × 1 min | With one task per service in implementation mode, zero healthy targets means that use case's requests get 503s. Missing data counts as breaching: the ALB always reports this metric. |
-| ECS CPU (per service) | `AWS/ECS` `CPUUtilization` avg (ClusterName, ServiceName) | > 80 % | 5 × 1 min | Replaces the proposal's EC2 rows. Sustained, not spiky, CPU means that service's task count or size is too small. |
-| ECS memory (per service) | `AWS/ECS` `MemoryUtilization` avg | > 80 % | 5 × 1 min | Node tasks near their memory limit get OOM-killed by ECS. |
+| ECS CPU (busiest service) | `MAX` of `AWS/ECS` `CPUUtilization` avg over every service (metric math) | > 80 % | 5 × 1 min | Replaces the proposal's EC2 rows. Sustained CPU on any service means its task count or size is too small; autoscaling acts first, so this fires when it can't keep up. |
+| ECS memory (busiest service) | `MAX` of `AWS/ECS` `MemoryUtilization` avg over every service | > 80 % | 5 × 1 min | Node tasks near their memory limit get OOM-killed by ECS. |
 | Scaling ceiling (per service) | `AWS/ECS` `LiveTaskCount` min | ≥ that service's `autoscaling_max_capacity` | 5 × 1 min | Replaces "ASG at max capacity". Only created when `autoscaling_enabled = true`: with a fixed task count the service is always at its maximum. |
 | DB CPU | `AWS/RDS` `CPUUtilization` avg | > 75 % | 5 × 1 min | Proposal threshold. db.t4g.micro is burstable, so sustained load also drains CPU credits (on the dashboard). |
 | DB connections | `AWS/RDS` `DatabaseConnections` max | > 64 (80 % of 80) | 5 × 1 min | 80 % of `max_connections`; see [max_connections](#rds-max_connections) for the 80. |
@@ -52,8 +52,10 @@ requests per service next to them.
 | Waiting-room size | `TicketMastery` `WaitingRoomSize` max (custom, no dimensions) | > 20 000 | 1 min | Proposal threshold: notify, and admins decide whether to raise the admit rate or the API scaling maximum. queue-manager writes it every scheduled run as CloudWatch Embedded Metric Format (it has no NAT, so it can't call `PutMetricData`). No data outside a sale = OK. |
 | Checkout failures | `TicketMastery` `CheckoutPaymentFailures` / `CheckoutPaymentAttempts` × 100 (log metric filters) | > 20 % with ≥ 5 attempts | 5 min | Proposal threshold: one in five payments failing means the payment provider is likely down. The 5-attempt floor stops a single declined card on a quiet day from alerting. |
 
-With the 5 dev services: 15 shared alarms + 4 per service × 5 = 35 alarms in implementation mode, 40 with autoscaling
-on (+1 scaling-ceiling alarm per service). Before the per-service split it was 19 (20).
+With the 5 dev services: 15 shared alarms + 2 busiest-service alarms + 1 per service × 5 = 22 in implementation mode,
+27 with autoscaling on (+1 scaling-ceiling alarm per service), plus the ticket-dlq alarm in `modules/messaging`.
+Before the per-service split it was 19 (20); the first version of the split had one alarm of each kind per service
+(40 with autoscaling), trimmed because per-service CPU, memory and unhealthy-host copies added noise, not signal.
 
 ### Proposal rows not carried over
 
@@ -141,8 +143,8 @@ address and need no confirmation. Budgets data refreshes a few times a day, so t
 | `tags` | `{}` | |
 
 `lambda_function_names` and `ecs_services` keys are fixed labels (they name the alarms, e.g.
-`ticketmastery-dev-lambda-ticket-fn-errors`, `ticketmastery-dev-discovery-ecs-cpu-high`), so `for_each` never depends
-on values only known after apply.
+`ticketmastery-dev-lambda-ticket-fn-errors`, `ticketmastery-dev-discovery-alb-no-healthy-hosts`), so `for_each` never
+depends on values only known after apply.
 
 ## Outputs
 
