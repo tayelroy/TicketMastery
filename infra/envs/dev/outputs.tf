@@ -70,9 +70,9 @@ output "ecs_cluster_name" {
   value       = module.ecs_service.cluster_name
 }
 
-output "ecs_service_name" {
-  description = "ECS service name (for `aws ecs update-service --force-new-deployment`)."
-  value       = module.ecs_service.service_name
+output "ecs_service_names" {
+  description = "ECS service name per service key (discovery, account, waiting-room, checkout, organiser), e.g. for `aws ecs update-service --force-new-deployment`: terraform output -json ecs_service_names | jq -r '.checkout'."
+  value       = module.ecs_service.service_names
 }
 
 output "ecr_repository_url" {

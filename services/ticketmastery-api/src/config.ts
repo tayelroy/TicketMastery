@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type ModuleKey, moduleKeys } from './modules/keys';
 
 /**
  * Environment-variable parser for booleans. `z.coerce.boolean()` treats the
@@ -15,6 +16,31 @@ const optionalString = z
   .string()
   .optional()
   .transform((v) => (v === undefined || v.trim() === '' ? undefined : v));
+
+/**
+ * API_MODULES: comma-separated feature module keys this process serves (in AWS, one ECS service per use case).
+ * Unset or empty = every module (local dev, tests). Unknown keys are refused, so a typo fails at start-up instead of
+ * silently serving 404s. Parsed into the keys in modules/keys.ts order, without duplicates.
+ */
+const apiModules = z
+  .string()
+  .optional()
+  .transform((v, ctx): ModuleKey[] => {
+    const requested = (v ?? '')
+      .split(',')
+      .map((k) => k.trim())
+      .filter((k) => k !== '');
+    if (requested.length === 0) return [...moduleKeys];
+    const unknown = requested.filter((k) => !(moduleKeys as readonly string[]).includes(k));
+    if (unknown.length > 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `unknown module ${unknown.join(', ')}; expected a comma-separated subset of ${moduleKeys.join(', ')}`,
+      });
+      return z.NEVER;
+    }
+    return moduleKeys.filter((k) => requested.includes(k));
+  });
 
 /** Exported for tests; the app reads the parsed `config` below. */
 export const envSchema = z
@@ -44,6 +70,8 @@ export const envSchema = z
     COGNITO_CLIENT_ID: optionalString,
 
     RUN_MIGRATIONS_ON_START: boolFromEnv(false),
+
+    API_MODULES: apiModules,
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.AUTH_MODE === 'dev-header' && !env.ALLOW_DEV_AUTH) {

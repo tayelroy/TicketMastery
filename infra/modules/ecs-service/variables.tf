@@ -68,13 +68,13 @@ variable "container_port" {
 }
 
 variable "task_cpu" {
-  description = "Fargate task CPU units (256 = 0.25 vCPU)."
+  description = "Default Fargate task CPU units (256 = 0.25 vCPU) for every service whose `services` entry leaves cpu unset."
   type        = number
   default     = 256
 }
 
 variable "task_memory" {
-  description = "Fargate task memory in MiB (must be valid for task_cpu)."
+  description = "Default Fargate task memory in MiB (must be valid for the CPU) for every service whose `services` entry leaves memory unset."
   type        = number
   default     = 512
 }
@@ -148,8 +148,58 @@ variable "db_secret_arn" {
 # ECS service / cluster
 ################################################################################
 
+variable "services" {
+  description = <<-EOT
+    One ECS service per use case, keyed by a short service key (service `<name>-<key>`, task family `<name>-<key>`).
+    All run the same image; each mounts only its API modules (API_MODULES) and gets its own target group, scaling
+    policies and deployments. Fields:
+      modules           API module keys to mount (services/ticketmastery-api/src/modules/keys.ts).
+      path_patterns     ALB path patterns routed to this service (max 5). Not used for default_service, which gets
+                        the listener's default action (everything no rule matches, including /health).
+      listener_priority ALB listener rule priority (21-50000, unique, required for every non-default service; 1-20 are
+                        auth-apigw's origin_header rules). Keep it fixed once applied.
+      tg_short_name     Replaces the key in the target group name `<name>-<tg_short_name>-tg` (max 32 characters).
+      desired_count, autoscaling_min, autoscaling_max, cpu, memory
+                        Per-service overrides. Unset = desired_count, autoscaling_min_capacity,
+                        autoscaling_max_capacity, task_cpu, task_memory.
+  EOT
+  type = map(object({
+    modules           = list(string)
+    path_patterns     = optional(list(string), [])
+    listener_priority = optional(number)
+    tg_short_name     = optional(string)
+    desired_count     = optional(number)
+    autoscaling_min   = optional(number)
+    autoscaling_max   = optional(number)
+    cpu               = optional(number)
+    memory            = optional(number)
+  }))
+
+  validation {
+    condition     = length(var.services) > 0 && alltrue([for k, s in var.services : can(regex("^[a-z0-9-]+$", k)) && length(s.modules) > 0])
+    error_message = "services needs at least one entry; keys are lowercase letters, digits and hyphens, and every service mounts at least one module."
+  }
+
+  # Same list as services/ticketmastery-api/src/modules/keys.ts: a typo fails the plan instead of crash-looping tasks.
+  validation {
+    condition     = alltrue(flatten([for s in values(var.services) : [for m in s.modules : contains(["discovery", "account", "waiting-room", "checkout", "organiser"], m)]]))
+    error_message = "services[*].modules must be API module keys: discovery, account, waiting-room, checkout, organiser."
+  }
+
+  validation {
+    condition     = alltrue([for s in values(var.services) : length(s.path_patterns) <= 5])
+    error_message = "An ALB listener rule takes at most 5 path patterns per service."
+  }
+}
+
+variable "default_service" {
+  description = "Key in `services` that the listener's default action forwards to: unmatched paths and /health (API Gateway's /health probe). Its path_patterns and listener_priority are ignored."
+  type        = string
+  default     = "discovery"
+}
+
 variable "desired_count" {
-  description = "Number of tasks. With autoscaling enabled, an apply resets the count to this value and the autoscaler re-adjusts afterwards."
+  description = "Default task count per service (services[*].desired_count overrides). With autoscaling enabled, an apply resets the count to this value and the autoscaler re-adjusts afterwards."
   type        = number
   default     = 1
 }
@@ -210,19 +260,19 @@ variable "health_check_path" {
 ################################################################################
 
 variable "enable_autoscaling" {
-  description = "Attach Application Auto Scaling (CPU + ALB request count target tracking)."
+  description = "Attach Application Auto Scaling (CPU + ALB request count target tracking) to every service, each with its own min/max."
   type        = bool
   default     = true
 }
 
 variable "autoscaling_min_capacity" {
-  description = "Minimum task count when autoscaling."
+  description = "Default minimum task count when autoscaling (services[*].autoscaling_min overrides)."
   type        = number
   default     = 1
 }
 
 variable "autoscaling_max_capacity" {
-  description = "Maximum task count when autoscaling."
+  description = "Default maximum task count when autoscaling (services[*].autoscaling_max overrides)."
   type        = number
   default     = 4
 }

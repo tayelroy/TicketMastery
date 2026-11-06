@@ -106,9 +106,12 @@ conflict -> 409.
 - `GET /health` (root, not `/api`): readiness for the **ALB target group**; runs `SELECT 1` with a 2s
   timeout. `200 {status:"ok", db:"ok", uptimeSeconds, version}` or `503 {status:"error", db:"down"}`.
 - `GET /health/live`: liveness, no DB (Docker `HEALTHCHECK`), so a DB blip does not kill every task.
-- Everything else is under `/api`, mounted from the registry in `src/modules/index.ts`:
+- Everything else is under `/api`, mounted from the registry in `src/modules/index.ts`. `API_MODULES` picks which
+  modules a process mounts (key column; unset = all). In AWS each use case runs as its own ECS service from the same
+  image with `API_MODULES=<key>`, and the ALB routes each path to it (`infra/modules/ecs-service`). Paths of modules a
+  process doesn't mount answer `404 not_found`; `/health` is always mounted.
 
-| Path | Module | Use case | Owner | Status |
+| Path | Module (`API_MODULES` key) | Use case | Owner | Status |
 |---|---|---|---|---|
 | `/api/concerts` | `discovery` | UC1 Concert discovery | Cody & Nai Xin | implemented (list with search/filter, detail, seat map; public) |
 | `/api/me` | `account` | UC2 My Tickets & Account | Andrew | implemented (profile, orders, one ticket, e-ticket download link) |
@@ -128,7 +131,8 @@ Each module has a `README.md` with its endpoints.
    in `src/http/errors.ts`.
 3. Protect routes with `authenticate` plus `requireUser` (any signed-in user) or `requireGroup('<group>')`
    (`src/auth`). Read the caller from `req.user` (`sub`, `groups`), never from `x-dev-user-*` headers.
-4. New module: add `{ basePath, router, useCase, owner }` to `src/modules/index.ts`.
+4. New module: add `{ key, basePath, router, useCase, owner }` to `src/modules/index.ts` and the key to
+   `src/modules/keys.ts`; for AWS add a service for it in `infra/envs/dev` (`ecs_services`).
 5. Seat holds (UC4): use `src/db/seat-holds.ts`, not hand-written variants.
 
 ### Adding a migration
@@ -156,6 +160,7 @@ instead of stopping start-up.
 | `ALLOW_DEV_AUTH` | `false` | must be `true` to run `dev-header` with `NODE_ENV=production`; logs a warning |
 | `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID` | unset | required with `AUTH_MODE=cognito`; Terraform sets them from `module.auth_apigw` |
 | `RUN_MIGRATIONS_ON_START` | `false` | migrate (advisory-locked) before listening |
+| `API_MODULES` | unset (all) | comma-separated module keys to mount (`discovery,account,waiting-room,checkout,organiser`); unknown key = start-up fails. Terraform sets one per ECS service |
 | `ORDER_EVENTS_TOPIC_ARN` | unset | UC4: SNS `order-events` topic for `OrderConfirmed`; unset = event only logged |
 | `TICKET_PDF_BUCKET` | unset | UC2: private S3 bucket with the e-ticket PDFs (UC4's; the API needs `s3:GetObject` + `s3:ListBucket`); unset = downloads answer `503` |
 | `WAITING_ROOM_JOIN_QUEUE_URL` | unset | UC3: SQS FIFO `join-queue` for `POST /api/waiting-room/:id/join` (`sqs:SendMessage`); unset = both waiting-room routes answer `501` |

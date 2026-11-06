@@ -7,8 +7,8 @@ locals {
 # The network always has 2 public + 2 private subnets (AZ a and AZ b), even in
 # the single-AZ implementation mode, because an ALB needs subnets in >= 2 AZs
 # and an RDS DB subnet group must span >= 2 AZs (even for a single-AZ
-# instance). In implementation mode everything that actually runs (the one API
-# task and the DB instance) sits in the first AZ; the AZ b subnets only satisfy
+# instance). In implementation mode everything that actually runs (one task per
+# API service and the DB instance) sits in the first AZ; the AZ b subnets only satisfy
 # those AWS requirements (plus the ALB node there).
 module "network" {
   source = "../../modules/network"
@@ -60,6 +60,8 @@ module "rds" {
   availability_zone = var.db_multi_az ? null : module.network.azs[0]
 }
 
+# One ECS service per use case (var.ecs_services), all from the same image, behind one ALB: discovery is the
+# listener default, the others get path rules. One shared task role and execution role.
 module "ecs_service" {
   source = "../../modules/ecs-service"
 
@@ -87,6 +89,7 @@ module "ecs_service" {
   db_name       = module.rds.db_name
   db_secret_arn = module.rds.master_user_secret_arn
 
+  services               = var.ecs_services
   desired_count          = var.desired_count
   container_insights     = var.container_insights
   enable_execute_command = var.enable_execute_command
@@ -189,7 +192,8 @@ module "auth_apigw" {
   alb_listener_arn     = var.alb_integration == "vpc_link" ? module.ecs_service.http_listener_arn : module.ecs_service.https_listener_arn
   alb_listener_port    = var.alb_integration == "vpc_link" ? 80 : 443
   alb_origin_domain    = var.alb_origin_domain
-  api_target_group_arn = module.ecs_service.target_group_arn
+  api_target_group_arn = module.ecs_service.default_target_group_arn
+  api_path_routes      = module.ecs_service.path_routes
 
   waiting_room_public = var.waiting_room_public
 }
@@ -229,20 +233,24 @@ module "messaging" {
 module "monitoring" {
   source = "../../modules/monitoring"
 
-  name                     = local.name
-  alert_email              = var.contact_email
-  alb_arn_suffix           = module.ecs_service.alb_arn_suffix
-  target_group_arn_suffix  = module.ecs_service.target_group_arn_suffix
-  ecs_cluster_name         = module.ecs_service.cluster_name
-  ecs_service_name         = module.ecs_service.service_name
-  autoscaling_enabled      = var.enable_autoscaling
-  autoscaling_max_capacity = var.autoscaling_max_capacity
-  rds_instance_id          = module.rds.instance_id
-  http_api_id              = module.auth_apigw.api_id
-  ticket_queue_name        = module.messaging.ticket_queue_name
-  ticket_dlq_name          = module.messaging.ticket_dlq_name
-  join_dlq_name            = module.waiting_room.join_dlq_name
-  api_log_group_name       = module.ecs_service.log_group_name
+  name             = local.name
+  alert_email      = var.contact_email
+  alb_arn_suffix   = module.ecs_service.alb_arn_suffix
+  ecs_cluster_name = module.ecs_service.cluster_name
+  ecs_services = {
+    for k, s in module.ecs_service.services : k => {
+      service_name             = s.service_name
+      target_group_arn_suffix  = s.target_group_arn_suffix
+      autoscaling_max_capacity = s.autoscaling_max_capacity
+    }
+  }
+  autoscaling_enabled = var.enable_autoscaling
+  rds_instance_id     = module.rds.instance_id
+  http_api_id         = module.auth_apigw.api_id
+  ticket_queue_name   = module.messaging.ticket_queue_name
+  ticket_dlq_name     = module.messaging.ticket_dlq_name
+  join_dlq_name       = module.waiting_room.join_dlq_name
+  api_log_group_name  = module.ecs_service.log_group_name
 
   lambda_function_names = {
     queue-manager = module.waiting_room.queue_manager_function_name

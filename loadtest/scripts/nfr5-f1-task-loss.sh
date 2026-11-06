@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# NFR-5 / drill F1: lose the API task and time the outage seen through API Gateway.
-# Stops the running ECS task (aws ecs stop-task), polls GET <api>/health every POLL seconds, and records when it first
-# fails and when it is 200 again (STABLE consecutive 200s). ECS then starts a replacement and the ALB health check
-# admits it. With two or more tasks the expected outage is zero.
+# NFR-5 / drill F1: lose an API task and time the outage seen through API Gateway.
+# Stops the running task of the discovery ECS service (the ALB default, which answers /health; with another
+# SERVICE_KEY the /health probe would not see the outage), polls
+# GET <api>/health every POLL seconds, and records when it first fails and when it is 200 again (STABLE consecutive
+# 200s). ECS then starts a replacement and the ALB health check admits it. With two or more tasks in that service the
+# expected outage is zero; the other services keep serving their routes throughout.
 #
 #   scripts/nfr5-f1-task-loss.sh                                   # AWS (BASE_URL defaults to the API Gateway URL)
 #   TARGET=local BASE_URL=http://localhost:3000 STOP_CMD="docker restart ticketmastery-api-1" scripts/nfr5-f1-task-loss.sh

@@ -1,21 +1,23 @@
 # One dashboard: alarm status on top, then one graph per alarm signal, in the same order as alarms.tf.
-# Horizontal annotations draw each alarm threshold on its graph.
+# Horizontal annotations draw each alarm threshold on its graph. Per-service signals are one graph with one line per
+# ECS service (labelled by service key), so the services can be compared at a glance.
 
 data "aws_region" "current" {}
 
 locals {
-  region = data.aws_region.current.name
+  region       = data.aws_region.current.name
+  service_keys = sort(keys(var.ecs_services))
 
   alarms = concat(
     [
       aws_cloudwatch_metric_alarm.alb_latency_p95,
       aws_cloudwatch_metric_alarm.alb_5xx_rate,
-      aws_cloudwatch_metric_alarm.alb_unhealthy_hosts,
-      aws_cloudwatch_metric_alarm.alb_no_healthy_hosts,
-      aws_cloudwatch_metric_alarm.ecs_cpu_high,
-      aws_cloudwatch_metric_alarm.ecs_memory_high,
     ],
-    aws_cloudwatch_metric_alarm.ecs_at_max_capacity,
+    [for k in local.service_keys : aws_cloudwatch_metric_alarm.alb_unhealthy_hosts[k]],
+    [for k in local.service_keys : aws_cloudwatch_metric_alarm.alb_no_healthy_hosts[k]],
+    [for k in local.service_keys : aws_cloudwatch_metric_alarm.ecs_cpu_high[k]],
+    [for k in local.service_keys : aws_cloudwatch_metric_alarm.ecs_memory_high[k]],
+    [for k in sort(keys(aws_cloudwatch_metric_alarm.ecs_at_max_capacity)) : aws_cloudwatch_metric_alarm.ecs_at_max_capacity[k]],
     [
       aws_cloudwatch_metric_alarm.rds_cpu_high,
       aws_cloudwatch_metric_alarm.rds_connections_high,
@@ -57,33 +59,70 @@ locals {
       left_label  = "Percent"
     },
     {
-      title = "API target health (ALB)"
+      title = "API requests per service (ALB target groups)"
       metrics = [
-        ["AWS/ApplicationELB", "HealthyHostCount", "TargetGroup", var.target_group_arn_suffix, "LoadBalancer", var.alb_arn_suffix, { stat = "Minimum", label = "Healthy" }],
-        ["AWS/ApplicationELB", "UnHealthyHostCount", "TargetGroup", var.target_group_arn_suffix, "LoadBalancer", var.alb_arn_suffix, { stat = "Maximum", label = "Unhealthy" }],
+        for k in local.service_keys :
+        ["AWS/ApplicationELB", "RequestCount", "TargetGroup", var.ecs_services[k].target_group_arn_suffix, "LoadBalancer", var.alb_arn_suffix, { stat = "Sum", label = k }]
       ]
       period      = 60
-      annotations = [{ label = "healthy alarm (< 1)", value = 1 }]
+      annotations = []
+      left_label  = "Requests"
+    },
+    {
+      title = "Healthy targets per service (ALB)"
+      metrics = [
+        for k in local.service_keys :
+        ["AWS/ApplicationELB", "HealthyHostCount", "TargetGroup", var.ecs_services[k].target_group_arn_suffix, "LoadBalancer", var.alb_arn_suffix, { stat = "Minimum", label = k }]
+      ]
+      period      = 60
+      annotations = [{ label = "no-healthy alarm (< 1)", value = 1 }]
       left_label  = "Tasks"
     },
     {
-      title = "ECS service CPU and memory"
+      title = "Unhealthy targets per service (ALB)"
       metrics = [
-        ["AWS/ECS", "CPUUtilization", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_service_name, { stat = "Average", label = "CPU" }],
-        ["AWS/ECS", "MemoryUtilization", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_service_name, { stat = "Average", label = "Memory" }],
+        for k in local.service_keys :
+        ["AWS/ApplicationELB", "UnHealthyHostCount", "TargetGroup", var.ecs_services[k].target_group_arn_suffix, "LoadBalancer", var.alb_arn_suffix, { stat = "Maximum", label = k }]
+      ]
+      period      = 60
+      annotations = [{ label = "alarm (> 0)", value = 0 }]
+      left_label  = "Tasks"
+    },
+    {
+      title = "ECS running tasks per service vs autoscaling max"
+      metrics = [
+        for k in local.service_keys :
+        ["AWS/ECS", "LiveTaskCount", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_services[k].service_name, { stat = "Maximum", label = k }]
+      ]
+      period = 60
+      # One line per distinct maximum, naming the services that share it.
+      annotations = [
+        for m in distinct([for k in local.service_keys : var.ecs_services[k].autoscaling_max_capacity]) : {
+          label = "max: ${join(", ", [for k in local.service_keys : k if var.ecs_services[k].autoscaling_max_capacity == m])}"
+          value = m
+        }
+      ]
+      left_label = "Tasks"
+    },
+    {
+      title = "ECS CPU per service"
+      metrics = [
+        for k in local.service_keys :
+        ["AWS/ECS", "CPUUtilization", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_services[k].service_name, { stat = "Average", label = k }]
       ]
       period      = 60
       annotations = [{ label = "alarm", value = var.ecs_utilization_percent }]
       left_label  = "Percent"
     },
     {
-      title = "ECS running tasks vs autoscaling max"
+      title = "ECS memory per service"
       metrics = [
-        ["AWS/ECS", "LiveTaskCount", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_service_name, { stat = "Maximum", label = "Live tasks" }],
+        for k in local.service_keys :
+        ["AWS/ECS", "MemoryUtilization", "ClusterName", var.ecs_cluster_name, "ServiceName", var.ecs_services[k].service_name, { stat = "Average", label = k }]
       ]
       period      = 60
-      annotations = [{ label = "autoscaling max", value = var.autoscaling_max_capacity }]
-      left_label  = "Tasks"
+      annotations = [{ label = "alarm", value = var.ecs_utilization_percent }]
+      left_label  = "Percent"
     },
     {
       title = "RDS CPU"

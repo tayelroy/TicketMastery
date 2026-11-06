@@ -73,7 +73,7 @@ The ECS service needs an image that doesn't exist yet. Create the repository fir
 
 ### Migrations
 
-When `RUN_MIGRATIONS_ON_START=true`, the API applies pending SQL migrations from `services/ticketmastery-api/migrations/` at container start. The run holds a Postgres advisory lock, so several tasks starting together are safe. A failing migration stops the task, and the ECS deployment circuit breaker rolls back. The app's own default is `false`; the ECS task definition sets it to `true` via the Terraform variable `run_migrations_on_start` (default `true`). Check the API logs for the migration lines after the first deploy.
+When `RUN_MIGRATIONS_ON_START=true`, the API applies pending SQL migrations from `services/ticketmastery-api/migrations/` at container start. The run holds a Postgres advisory lock, so several tasks starting together are safe: all five ECS services (one per use case) run the same image with migrations on, the first task to start applies them, and the others wait for the lock and then find nothing to do. A failing migration stops the task, and the ECS deployment circuit breaker rolls back that service. The app's own default is `false`; the ECS task definitions set it to `true` via the Terraform variable `run_migrations_on_start` (default `true`). Check the API logs for the migration lines after the first deploy.
 
 ## Verify
 
@@ -86,10 +86,15 @@ curl -i "https://$(terraform output -raw cloudfront_domain_name)/health"
 Expect `200` with `{"status":"ok","db":"ok",...}`. The ALB is internal, so `alb_dns_name` only resolves to private IPs and can't be reached from a laptop; test through API Gateway (or CloudFront, which forwards `/health` and `/api/*` to it). A `503` with JSON `"db":"down"` comes from the API itself: the API can't reach the database (check the SG chain, the secret, and `DB_SSL`). `{"message":"Service Unavailable"}` from API Gateway means the VPC link can't reach the ALB or no task is registered yet. `/health/live` answers without touching the DB. If it isn't healthy after a few minutes:
 
 ```bash
-aws logs tail "$(terraform output -raw log_group_name)" --follow
-aws ecs describe-services --cluster "$(terraform output -raw ecs_cluster_name)" \
-  --services "$(terraform output -raw ecs_service_name)" --query 'services[0].events[0:5]'
+aws logs tail "$(terraform output -raw log_group_name)" --follow   # all services; streams are prefixed <service key>/
+for s in $(terraform output -json ecs_service_names | jq -r '.[]'); do
+  echo "== $s"
+  aws ecs describe-services --cluster "$(terraform output -raw ecs_cluster_name)" \
+    --services "$s" --query 'services[0].events[0:5]'
+done
 ```
+
+`/health` is answered by the `discovery` service (the ALB default). Each service logs the modules it mounts in its `ticketmastery-api listening` line (e.g. `"modules":["checkout"]`); a path that reaches a service not mounting it answers `404 not_found`, which means a listener rule is missing.
 
 Until Cognito is live, the service runs `AUTH_MODE=dev-header`. API Gateway's JWT authorizer guards the protected routes, but **anyone with a valid Cognito token can send `x-dev-user-id` / `x-dev-user-groups` and impersonate any user**, so don't leave it running with real data, and switch `auth_mode = "cognito"` as soon as the API verifies tokens (#12).
 
@@ -103,11 +108,11 @@ aws secretsmanager get-secret-value \
   --query SecretString --output text
 ```
 
-Print it only when you need it. Never paste it into chat, code, `.env` files, or tickets. The database is in private subnets and **can't be reached from your laptop**. Debug through the API, or with ECS Exec into the running API task (on by default, `enable_execute_command = true`; needs the Session Manager plugin):
+Print it only when you need it. Never paste it into chat, code, `.env` files, or tickets. The database is in private subnets and **can't be reached from your laptop**. Debug through the API, or with ECS Exec into a running API task (on by default, `enable_execute_command = true`; needs the Session Manager plugin). Any service's task has the DB settings; this uses `discovery`:
 
 ```bash
 TASK=$(aws ecs list-tasks --cluster "$(terraform output -raw ecs_cluster_name)" \
-  --service-name "$(terraform output -raw ecs_service_name)" --query 'taskArns[0]' --output text)
+  --service-name "$(terraform output -json ecs_service_names | jq -r '.discovery')" --query 'taskArns[0]' --output text)
 aws ecs execute-command --cluster "$(terraform output -raw ecs_cluster_name)" --task "$TASK" \
   --container ticketmastery-api --interactive --command "sh"
 ```
@@ -116,15 +121,25 @@ aws ecs execute-command --cluster "$(terraform output -raw ecs_cluster_name)" --
 
 ## Deploying a new image
 
+There is one image for all five ECS services (discovery, account, waiting-room, checkout, organiser); each service runs it with its own `API_MODULES`.
+
 1. Build and push a new tag (step 2 above).
-2. Either set `image_tag` to the new tag and run `terraform plan -out tfplan && terraform apply tfplan`, or re-push `latest` and force a redeploy:
+2. Either set `image_tag` to the new tag and run `terraform plan -out tfplan && terraform apply tfplan` (every service gets a new task definition revision and rolls on its own, each with its own circuit breaker), or re-push `latest` and force a redeploy of every service:
 
    ```bash
-   aws ecs update-service --cluster "$(terraform output -raw ecs_cluster_name)" \
-     --service "$(terraform output -raw ecs_service_name)" --force-new-deployment
+   for s in $(terraform output -json ecs_service_names | jq -r '.[]'); do
+     aws ecs update-service --cluster "$(terraform output -raw ecs_cluster_name)" \
+       --service "$s" --force-new-deployment --query 'service.serviceName' --output text
+   done
    ```
 
+   To roll out only one service, run the `update-service` line for that one name (e.g. `jq -r '.checkout'`); the others keep their running tasks.
+
 The API image is deployed by hand like this; only the frontend has a pipeline (next section).
+
+### Cutover from the single `ticketmastery-dev-api` service
+
+The first apply after the per-service split replaces the single API service, its task definition family, target group and autoscaling resources with five of each. The cluster, ALB, listeners, log group and IAM roles stay. Expect a short gap on dev while the new services register: the listener's default action switches to the new `discovery` target group, and the old service is deleted once nothing references its target group.
 
 ## Deploying the frontend
 

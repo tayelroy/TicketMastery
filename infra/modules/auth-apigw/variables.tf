@@ -78,9 +78,23 @@ variable "alb_origin_domain" {
 }
 
 variable "api_target_group_arn" {
-  description = "origin_header mode only: the API target group the header rule forwards to (module.ecs_service.target_group_arn)."
+  description = "origin_header mode only: target group of the default ECS service, where the header rule forwards everything no path route matches (module.ecs_service.default_target_group_arn)."
   type        = string
   default     = ""
+}
+
+variable "api_path_routes" {
+  description = "origin_header mode only: the other ECS services in priority order (module.ecs_service.path_routes); each gets a header + path rule ahead of the default header rule. vpc_link mode ignores it (ecs-service's own path rules route on the HTTP listener)."
+  type = list(object({
+    target_group_arn = string
+    path_patterns    = list(string)
+  }))
+  default = []
+
+  validation {
+    condition     = length(var.api_path_routes) <= 9
+    error_message = "At most 9 path routes: they take listener priorities 1-9, below the default header rule (10)."
+  }
 }
 
 ################################################################################

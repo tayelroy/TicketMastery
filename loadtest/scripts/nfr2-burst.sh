@@ -59,8 +59,11 @@ EVENTS="$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" -
 "$LOADTEST_DIR/scripts/alb-metrics.sh" nfr2 "$START" "$END" >/dev/null
 
 # Scale-out is judged on the desired count (a deployment also briefly runs an extra task without any scaling).
-TASKS="$(tail -n +2 "$CSV" | { grep -v ',error' || true; } | jq -R -s --argjson ramp "$RAMP_START_EPOCH" '
-  [split("\n")[] | select(length > 0) | split(",") | {time: .[0], desired: (.[1] | tonumber), running: (.[2] | tonumber)}] as $rows
+# Columns 6+ of the CSV are every API service's desired count (ecs-watch.sh): only the watched service should grow.
+TASKS="$(tail -n +2 "$CSV" | { grep -v ',error' || true; } | jq -R -s --argjson ramp "$RAMP_START_EPOCH" \
+  --args '
+  [split("\n")[] | select(length > 0) | split(",") | {time: .[0], desired: (.[1] | tonumber), running: (.[2] | tonumber),
+    all: (.[5:] | map(tonumber? // null))}] as $rows
   | ($rows[0].desired) as $initial
   | ([$rows[].desired] | max) as $maxDesired
   | ($rows | map(select(.desired > $initial)) | first) as $firstUp
@@ -69,19 +72,21 @@ TASKS="$(tail -n +2 "$CSV" | { grep -v ',error' || true; } | jq -R -s --argjson 
   {initialTasks: $initial, maxTasks: $maxDesired, maxRunning: ([$rows[].running] | max),
    scaleOutDecidedAt: $firstUp.time, scaleOutDecidedMinAfterRamp: mins($firstUp),
    maxTasksRunningAt: $reachedMax.time, scaleOutCompleteMinAfterRamp: mins($reachedMax),
-   samples: $rows}')"
+   maxDesiredByService: ([$ARGS.positional | to_entries[] | .key as $i | {key: .value, value: ([$rows[].all[$i] | values] | max)}] | from_entries),
+   samples: ($rows | map(del(.all)))}' "${SERVICE_KEYS[@]}")"
 
-jq -n --arg start "$START" --arg end "$END" --arg csv "$CSV" --argjson tasks "$TASKS" \
+jq -n --arg start "$START" --arg end "$END" --arg csv "$CSV" --arg service "$SERVICE" --argjson tasks "$TASKS" \
   --argjson activities "$ACTIVITIES" --argjson events "$EVENTS" \
-  '{test: "nfr2-burst-aws", start: $start, end: $end, ecsCsv: $csv, tasks: $tasks, scalingActivities: $activities, serviceEvents: $events,
+  '{test: "nfr2-burst-aws", service: $service, start: $start, end: $end, ecsCsv: $csv, tasks: $tasks, scalingActivities: $activities, serviceEvents: $events,
     scaleOutWithin5Min: ($tasks.scaleOutCompleteMinAfterRamp != null and $tasks.scaleOutCompleteMinAfterRamp <= 5)}' > "$RESULT_JSON"
 
 jq -r '
   def cell: if . == null then "" else tostring end;
-  "# nfr2-burst: ECS scaling (\(.start) to \(.end))\n",
+  "# nfr2-burst: ECS scaling of \(.service) (\(.start) to \(.end))\n",
   "| Tasks before | Max tasks | Scale-out decided (min after ramp start) | Max tasks running (min after ramp start) | Scale-out ≤ 5 min |",
   "| --- | --- | --- | --- | --- |",
   "| \(.tasks.initialTasks) | \(.tasks.maxTasks) | \(.tasks.scaleOutDecidedMinAfterRamp | cell) | \(.tasks.scaleOutCompleteMinAfterRamp | cell) | \(if .scaleOutWithin5Min then "PASS" else "FAIL / no scale-out" end) |\n",
+  "Max desired tasks per API service during the run: \(.tasks.maxDesiredByService | to_entries | map("\(.key) \(.value | cell)") | join(", "))\n",
   "Task count over time (every 15 s):\n",
   "| Time (UTC) | Desired | Running |", "| --- | --- | --- |",
   (.tasks.samples[] | "| \(.time) | \(.desired) | \(.running) |"),

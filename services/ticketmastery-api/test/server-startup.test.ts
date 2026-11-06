@@ -14,6 +14,7 @@ interface LogLine {
   level: number;
   msg: string;
   authMode?: string;
+  modules?: string[];
 }
 
 interface StartResult {
@@ -112,5 +113,21 @@ describe('server start-up', () => {
     assert.match(messages(result)[0]!, /^!!!!! AUTH_MODE=dev-header IN PRODUCTION/);
     assert.deepEqual(messages(result).slice(1), ['ticketmastery-api listening', 'shutting down']);
     assert.equal(result.code, 0, result.stderr);
+  });
+
+  test('API_MODULES: the listening line names the mounted modules (all when unset)', async () => {
+    const all = await startServer({ TM_TEST_JWKS: 'unreachable' });
+    assert.deepEqual(all.logs[0]!.modules, ['discovery', 'account', 'waiting-room', 'checkout', 'organiser']);
+    const checkout = await startServer({ API_MODULES: 'checkout', TM_TEST_JWKS: 'unreachable' });
+    assert.deepEqual(messages(checkout), ['ticketmastery-api listening', 'shutting down']);
+    assert.deepEqual(checkout.logs[0]!.modules, ['checkout']);
+    assert.equal(checkout.code, 0, checkout.stderr);
+  });
+
+  test('API_MODULES with an unknown key: exits 1 before listening', async () => {
+    const result = await startServer({ API_MODULES: 'checkout,browse', TM_TEST_JWKS: 'unreachable' });
+    assert.equal(result.code, 1);
+    assert.deepEqual(messages(result), []);
+    assert.match(result.stderr, /^Invalid environment configuration:\n {2}- API_MODULES: unknown module browse;/);
   });
 });
