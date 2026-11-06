@@ -14,6 +14,7 @@ Organisers only manage concerts where `organiser_id` equals their Cognito `sub` 
 | `POST /concerts/:id/publish` | `draft` -> `scheduled` (needs ticket types + a matching layout) |
 | `POST /concerts/:id/cancel` | Cancel with `{ reason }`; allowed even after the layout locks, refused (409) once `completed`. Notifies every ticket holder (below); the response adds `cancellationNotices: { orders, published }`. On an already cancelled concert it only re-sends the notices |
 | `GET /concerts/:id/dashboard` | Live available/held/sold + revenue per ticket type (`Cache-Control: no-store`) |
+| `GET /reports/sales?days=7\|30\|90\|all&concertId=` | Sales report for my concerts (or one): totals, by concert, by day, by ticket type, seat status, recent orders (`Cache-Control: no-store`) |
 
 ## Rules
 
@@ -44,6 +45,18 @@ Organisers only manage concerts where `organiser_id` equals their Cognito `sub` 
   ```
 
   Without `ORDER_EVENTS_TOPIC_ARN` (local runs) nothing is published.
+
+- **Reports** (`GET /reports/sales`, UC5 internal reporting, the organiser UI's `/organiser/reports`): read from the
+  five `report_*` views (`migrations/0003_uc5_reporting_views.sql`, see `docs/reporting.md`), every query filtered
+  on `organiser_id = <caller's sub>`; with `concertId` the concert must be the caller's (404/403 as above). Sales are
+  confirmed orders only; money is integer cents per currency, never added across currencies. `days` (default `30`)
+  selects Singapore calendar days: `to` is today in Singapore, `from` is `days - 1` days earlier, filtered on
+  `sale_date_sgt`; `all` gives `from: null` (since the first sale). In the range: `totals` (with `averageOrderCents`
+  = gross / orders, rounded), `byConcert` (gross descending; cancelled concerts keep their sales, tagged by `status`),
+  `byDay` (every day from `from`, or the first sale, to `to`, zero-filled, per currency with sales in the range) and
+  `recentOrders` (newest 50, no fan identity). Not in the range: `byTicketType` is **all time** (the view has no
+  date) and `seatStatus` is the current available/held/sold/total of every concert, drafts included. Six queries
+  run in parallel on the pool, no transaction (`test/organiser-reports.test.ts`, against Postgres).
 
 ## Code
 

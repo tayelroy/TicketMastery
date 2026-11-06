@@ -3,6 +3,7 @@ import { ORGANISERS_GROUP } from '../../auth/session';
 import type { FeatureRegistration } from '../../features';
 import { OrganiserConcertPage } from './OrganiserConcertPage';
 import { OrganiserHomePage } from './OrganiserHomePage';
+import { OrganiserReportsPage } from './OrganiserReportsPage';
 
 export const organiserFeature: FeatureRegistration = {
   routes: [
@@ -19,6 +20,14 @@ export const organiserFeature: FeatureRegistration = {
       element: (
         <RequireAuth group={ORGANISERS_GROUP}>
           <OrganiserConcertPage />
+        </RequireAuth>
+      ),
+    },
+    {
+      path: '/organiser/reports',
+      element: (
+        <RequireAuth group={ORGANISERS_GROUP}>
+          <OrganiserReportsPage />
         </RequireAuth>
       ),
     },

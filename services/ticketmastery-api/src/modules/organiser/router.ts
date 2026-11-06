@@ -7,6 +7,7 @@ import {
   createConcertBody,
   replaceLayoutBody,
   replaceTicketTypesBody,
+  salesReportQuery,
 } from './schemas';
 import * as service from './service';
 
@@ -80,5 +81,14 @@ organiserRouter.get(
     // Polled every 5s by the organiser UI; must never be served from a cache.
     res.set('Cache-Control', 'no-store');
     res.json(await service.getDashboard(req.user!.sub, id));
+  }),
+);
+
+organiserRouter.get(
+  '/reports/sales',
+  asyncHandler(async (req, res) => {
+    const query = salesReportQuery.parse(req.query);
+    res.set('Cache-Control', 'no-store');
+    res.json(await service.getSalesReport(req.user!.sub, query));
   }),
 );

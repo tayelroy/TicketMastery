@@ -386,3 +386,139 @@
   border-radius: 20px;
   font-size: 0.92rem;
 }
+
+/* ---------- Reports ---------- */
+
+.org-head-actions {
+  margin-top: 0;
+}
+
+.org-report-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+}
+
+.org-segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.3rem;
+  border-radius: 999px;
+  background: var(--glass-dark);
+}
+
+.org-segmented button {
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
+}
+
+.org-segmented button:hover {
+  background: var(--glass-strong);
+  transform: none;
+}
+
+.org-segmented button[aria-pressed='true'] {
+  background: #ffffff;
+  color: var(--ink);
+}
+
+.org-report-concert {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.org-report-concert select {
+  max-width: 22rem;
+}
+
+.org-report-note {
+  margin: 1rem 0 0;
+}
+
+.org-table-scroll {
+  overflow-x: auto;
+}
+
+.org-chart {
+  margin: 1rem 0 0;
+}
+
+.org-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.org-chart figcaption {
+  margin-top: 0.5rem;
+}
+
+.org-chart-axis {
+  fill: var(--muted);
+  font-size: 13px;
+}
+
+.org-chart-grid {
+  stroke: var(--glass-border);
+  stroke-dasharray: 4 4;
+}
+
+.org-chart-base {
+  stroke: var(--glass-border);
+}
+
+.org-chart-hit {
+  fill: transparent;
+}
+
+.org-chart-bar {
+  fill: rgba(255, 255, 255, 0.85);
+}
+
+.org-chart g:hover .org-chart-bar {
+  fill: var(--ok);
+}
+
+.org-chart g:hover .org-chart-hit {
+  fill: rgba(255, 255, 255, 0.08);
+}
+
+.org-bars {
+  display: grid;
+  gap: 0.9rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.org-bars-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.org-bars-label a {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.org-bars-track {
+  height: 0.7rem;
+  border-radius: 999px;
+  background: var(--glass-dark);
+  overflow: hidden;
+}
+
+.org-bars-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+}

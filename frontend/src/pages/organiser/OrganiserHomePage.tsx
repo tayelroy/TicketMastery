@@ -28,11 +28,16 @@ export function OrganiserHomePage() {
           <p className="eyebrow">Organiser</p>
           <h1>My concerts</h1>
         </div>
-        {!creating && (
-          <button type="button" onClick={() => setCreating(true)}>
-            + New concert
-          </button>
-        )}
+        <div className="row org-head-actions">
+          <Link to="/organiser/reports" className="btn ghost">
+            Reports
+          </Link>
+          {!creating && (
+            <button type="button" onClick={() => setCreating(true)}>
+              + New concert
+            </button>
+          )}
+        </div>
       </div>
 
       {creating && <CreateConcertForm onCancel={() => setCreating(false)} />}
