@@ -56,9 +56,15 @@ variable "multi_az" {
 }
 
 variable "availability_zone" {
-  description = "AZ for a single-AZ instance (must be one of the DB subnet group's AZs). Must be null when multi_az = true. null lets AWS choose. Changing it on an existing instance replaces the instance."
+  description = "AZ for a single-AZ instance at creation (must be one of the DB subnet group's AZs). Must be null when multi_az = true. null lets AWS choose. Ignored after creation (lifecycle ignore_changes): changing it would replace the instance."
   type        = string
   default     = null
+}
+
+variable "apply_immediately" {
+  description = "Apply modifications (Multi-AZ, instance class, backups) immediately instead of in the next maintenance window."
+  type        = bool
+  default     = true
 }
 
 variable "backup_retention_period" {

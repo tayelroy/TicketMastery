@@ -38,7 +38,14 @@ resource "aws_db_instance" "this" {
   multi_az               = var.multi_az
   # Pins a single-AZ instance to one AZ (null = AWS picks). Must be null when
   # multi_az = true; RDS rejects both together (see the precondition below).
+  # Only used at creation: changing the AZ would replace the instance (and its
+  # data), and after a Multi-AZ failover the primary can sit in either AZ, so
+  # availability_zone is in ignore_changes below.
   availability_zone = var.availability_zone
+
+  # Apply class, Multi-AZ and backup changes now rather than in the next
+  # maintenance window.
+  apply_immediately = var.apply_immediately
 
   # Default parameter group for the family; PostgreSQL 15+ defaults rds.force_ssl = 1.
 
@@ -57,6 +64,8 @@ resource "aws_db_instance" "this" {
   }
 
   lifecycle {
+    ignore_changes = [availability_zone]
+
     precondition {
       condition     = !(var.multi_az && var.availability_zone != null)
       error_message = "availability_zone must be null when multi_az = true (RDS rejects both together)."
