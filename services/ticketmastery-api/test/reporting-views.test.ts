@@ -3,7 +3,8 @@
  * Sales are made by the real UC5 + UC4 services (publish, hold, pay, release, decline), so these tests break if
  * UC4's tables or statuses change under the views. Only confirmed_at is moved afterwards, to pin the Singapore
  * day boundary. Needs a real Postgres, like account.test.ts: skipped when DB_HOST is unset, and everything runs
- * in a throwaway schema that is dropped at the end.
+ * in a throwaway schema that is dropped at the end. The reporting_ro tests (0004) also need a superuser connection,
+ * as in docker-compose, to SET ROLE.
  */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -530,6 +531,51 @@ describe(
           total: 0,
         },
       ]);
+    });
+
+    test("reporting_ro (0004): SELECT on the five report_* views and nothing else in the schema", async () => {
+      assert.ok(
+        appliedMigrations.includes("0004_uc5_reporting_role.sql"),
+        appliedMigrations.join(", "),
+      );
+      const { rows } = await db.query<{ relname: string }>(
+        `SELECT c.relname FROM pg_class c
+          WHERE c.relnamespace = $1::regnamespace AND c.relkind IN ('r', 'v', 'm', 'p', 'f')
+            AND has_table_privilege('reporting_ro', c.oid, 'SELECT')`,
+        [schema],
+      );
+      assert.deepEqual(rows.map((r) => r.relname).sort(), [
+        "report_confirmed_orders",
+        "report_sales_by_concert",
+        "report_sales_by_day",
+        "report_sales_by_ticket_type",
+        "report_seat_status",
+      ]);
+      const role = await db.query<{ rolconfig: string[] | null }>(
+        "SELECT rolconfig FROM pg_roles WHERE rolname = 'reporting_ro'",
+      );
+      assert.ok(
+        role.rows[0]?.rolconfig?.includes("default_transaction_read_only=on"),
+        JSON.stringify(role.rows),
+      );
+    });
+
+    test("reporting_ro (0004): reads the views with their owner's rights, but not the tables", async () => {
+      const client = await db.pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL ROLE reporting_ro");
+        const { rows } = await client.query<{ n: string }>(
+          "SELECT count(*) AS n FROM report_sales_by_concert",
+        );
+        assert.equal(Number(rows[0]!.n), 3); // X in SGD and USD, Y in SGD
+        await assert.rejects(client.query("SELECT 1 FROM orders LIMIT 1"), {
+          code: "42501",
+        });
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
     });
   },
 );
