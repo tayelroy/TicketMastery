@@ -1,6 +1,6 @@
 # Deploying the base stack (dev)
 
-This deploys the VPC, security groups, ECR, RDS, and the `ticketmastery-api` ECS service behind the ALB, into `ap-southeast-1`.
+This deploys the VPC, security groups, ECR, RDS, and the six API ECS services (one image, one service per feature) behind the ALB, into `ap-southeast-1`.
 
 > **Before any `apply` or `destroy`, tell the team in the group chat.** Cody owns the AWS account. While state is local (the default), **only one person applies `dev`**, because state lives on that person's laptop.
 

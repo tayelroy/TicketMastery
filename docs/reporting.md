@@ -12,7 +12,8 @@ internal reporting and sales statistics, for example in QuickSight.
   API module, which runs as its own (sixth) ECS service, `reporting`. It reads the five views live, only ever for the
   signed-in organiser's concerts, and connects to RDS as the least-privilege role `reporting_ro` (migration `0004`),
   whose password is in Secrets Manager. See [Reporting service](#reporting-service).
-- **QuickSight:** designed, not deployed (see [QuickSight](#quicksight)).
+- **QuickSight:** designed and built in Terraform, then removed: the AWS Free-plan account can't subscribe (see
+  [QuickSight](#quicksight)).
 
 The live organiser dashboard (`GET /api/organiser/concerts/:id/dashboard`, polled every 5 s) stays the tool for
 the on-sale moment. The reports are for after-the-fact questions across concerts: how much did we sell, of what,

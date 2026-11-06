@@ -16,7 +16,7 @@ Submission is done when all of these hold:
 1. **All five use cases work live on AWS** through the CloudFront URL, signed in with Cognito:
    UC1 browse → UC3 join the waiting room and get admitted → UC4 hold seats and pay → UC2 see the ticket and
    download its PDF, and receive the e-ticket email → UC5 organiser creates, publishes and cancels a concert and sees
-   live counts; sales reporting views exist in RDS, and QuickSight is described as a design-only extension.
+   live counts and sales reports (a read-only `reporting` ECS service); QuickSight was removed (see W5).
 2. **Monitoring and alerts are deployed** in Terraform: a CloudWatch dashboard, alarms for every row of the
    proposal's monitoring table that applies to the built stack, alert emails through SNS, and AWS Budgets at
    USD 20/40/60/80.
@@ -28,24 +28,35 @@ Submission is done when all of these hold:
    with a rehearsed live-demo script.
 6. `main` contains everything, deployed from `main`; the README status tables and docs match what is deployed.
 
-## Status (1 Nov 2026, 10:00 UTC)
+## Status (6 Nov 2026)
 
 | # | Status | Notes |
 |---|---|---|
 | W1 UC2 | Done | PR #19 merged into `feat/final-integration` with Andrew's later fixes (seat order, PDF check, coverage); Cognito attribute fix applied and smoke-tested (email change pending until verified; `phone_number` write rejected) |
 | W2 e-tickets | Done | `ticket-fn` live; first live run exposed a missing `ses:SendRawEmail` permission, fixed and re-tested (NFR-7) |
 | W3 UC3 admit | Done | Admit schedule live; checkout enforces admission |
-| W4 monitoring | Done | 19 alarms + dashboard + Budgets; alarms fired during the burst test; email delivery tested |
-| W5 reporting | Done | Views live; QuickSight design only (`docs/reporting.md`) |
-| W6 evidence | Done | NFR-1–11 measured; results in `docs/report/evidence/` |
-| W7 deploy | Done | API image `d1bd6e8` (+ `ticket-fn` fix), frontend redeployed; stack live on CloudFront |
-| W8 report | Done | `docs/report/report.md` → `report.pdf` (19 pages) and `report.docx` |
-| W9 slides + demo | Outline done | `slides.md` (21 slides, 19.75 min) and `demo-script.md`; the team lays out the Canva deck and rehearses |
-| W10 docs | Done | Status tables, architecture decisions, cost estimate (whole stack ≈ USD 72/month) |
+| W4 monitoring | Done | 30 alarms (all OK, `docs/report/evidence/cloudwatch-alarms.md`) + dashboard (one line per service) + Budgets; email delivery tested |
+| W5 reporting | Done | Instructor feedback (e). Read-only `reporting` ECS service (`/api/reports/sales`, DB login `reporting_ro`) and Organiser → "Sales reports" page. QuickSight built in Terraform, then removed: the account is on the AWS Free plan and can't subscribe |
+| W5b per-feature services | Done | Instructor feedback (b). 6 ECS services from one image (discovery, account, waiting-room, checkout, organiser, reporting), each with its own autoscaling; image `4a443fa` |
+| W6 evidence | Done | NFR-1–11 measured; 6 Nov browse burst on the split stack (0 dropped, only discovery scaled); results in `docs/report/evidence/` and `loadtest/results/` |
+| W7 deploy | Done (API) | API image `4a443fa` on all six services; frontend still to deploy from `main` |
+| W8 report | Being updated | `docs/report/report.md` → `report.pdf` and `report.docx` |
+| W9 slides + demo | Being updated | `slides.md`, `slide-changes.md`, `demo-script.md` (live concert "TicketMastery Demo Night", reports step added) |
+| W10 docs | Being updated | Status tables, architecture decisions, cost estimate (run rate higher with 6 tasks) |
 
-Left for the team: review and merge the integration PR (CODEOWNERS approvals); lay out the slides in Canva and
-rehearse the demo (`demo-script.md`: verify the demo fans' emails in SES first); peer evaluation (individual);
-`terraform destroy` after the presentation.
+Left for the team:
+
+1. Merge PR #24 (CODEOWNERS approvals), then this docs branch.
+2. Deploy the frontend from `main` (workflow runs on `main`).
+3. Update the Canva deck as listed in `docs/report/slide-changes.md`.
+4. Verify the demo fan accounts (and the backup fan) as SES identities.
+5. Take `demo-15` to `demo-17` and the full-run recording (`demo-script.md`, Fallback assets).
+6. Dress rehearsal on 8 Nov.
+7. Submit the report and deck by Tue 10 Nov 2026 19:00 SGT.
+8. Peer evaluation (individual).
+9. `terraform destroy` after 10 Nov (tell the team first). No need to run `reporting-user.sh disable` first: destroy
+   deletes the RDS instance (and with it the `reporting_ro` role) and the `reporting/reporting-ro` secret
+   (no recovery window), see `docs/deploy.md`.
 
 ## Starting point (checked 2026-10-31)
 

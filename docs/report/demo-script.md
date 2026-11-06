@@ -5,8 +5,8 @@ Site: **https://d1ubso1416lulu.cloudfront.net**
 
 Every label below is copied from `frontend/src` (the quoted text is what appears on screen). Some labels are shown
 in capitals by CSS (for example the waiting room's "Your queue number" appears as YOUR QUEUE NUMBER, and eyebrow
-labels such as "Order confirmed"). Prices assume the demo concert set up below: CAT1 at S$88, so two CAT1 seats cost
-$176 + a S$4 booking fee per seat = **$184.00**.
+labels such as "Order confirmed"). Prices assume the live demo concert below: Standard at S$88, so two Standard
+seats cost $176 + a S$4 booking fee per seat = **$184.00**.
 
 ## Roles
 
@@ -60,25 +60,17 @@ one session per browser profile).
   `aws sesv2 get-email-identity --email-identity <ses_from_address> --query VerifiedForSendingStatus` → `true`.
 - [ ] **SNS subscription confirmed:** SNS console → Subscriptions → the email subscription on
   `ticketmastery-dev-alerts` shows *Confirmed*, not *PendingConfirmation* (until confirmed, alarm emails are dropped).
-- [ ] **Create the demo concert** (organiser profile). Its sale must already be open during the presentation,
-  because `queue-manager` only admits fans inside the sale window. The API only accepts a sale start in the future,
-  and ticket types, layout and publish must all be done **before** the sale opens (after that the layout is locked:
-  `409 layout_locked`). So:
-  1. "Organiser" → "+ New concert".
-  2. Title `TicketMastery Demo Night`, Artist `The Cloud Engineers`, Venue `Singapore Indoor Stadium`.
-  3. "Sale opens": about **15 minutes from now** (the laptop must be on Singapore time: the field is local time).
-     Leave "Sale closes" and "Show starts" at their defaults (about 4 weeks ahead, so the sale is still open on
-     10 Nov).
-  4. "Create draft". The concert page opens with status "Draft".
-  5. "Ticket types": row 1 Name `CAT1`, Price `88`, Quantity `40`, Max / order `4`; "+ Add ticket type"; row 2
-     Name `CAT2`, Price `128`, Quantity `20`, Max / order `4`; "Save ticket types" (the form reloads and the "Seat
-     layout" panel appears).
-  6. "Seat layout" is pre-filled (section `Floor`, rows A and B for CAT1 seats 1–20, row C for CAT2 seats 1–20);
-     the tally shows "CAT1: 40 / 40 seats" and "CAT2: 20 / 20 seats". "Save layout" → "Saved".
-  7. "Get ready to publish" → "Publish concert". Status becomes "Published".
-  8. After the sale opens, reload: the page shows "Ticket types and the seat layout are locked because the sale has
-     started." The public page shows "On sale now until …" and a "Get tickets" button.
-  9. Copy the concert's organiser URL into the Organiser profile's tab 2.
+- [ ] **Demo concert (already created). Do not recreate it.** "TicketMastery Demo Night" (id starts `bc716554`),
+  organiser profile, venue `Esplanade Concert Hall`, ticket types **Standard $88** and **VIP $168**. Sale open since
+  31 Oct, closes 27 Nov 2026 20:00 SGT; show 28 Nov 2026 20:00 SGT. Check:
+  1. Organiser tab 2 (`/organiser/concerts/bc716554…`) shows status "Published", the lock banner "Ticket types and
+     the seat layout are locked because the sale has started." and the "Sales" panel "Live · updated …".
+  2. The public page shows "On sale now until …" and a "Get tickets" button.
+  3. Seats left: on 6 Nov, **38 Standard** and **10 VIP**. Each full run sells 2 Standard seats, so write down the
+     count after every rehearsal; keep at least 4 Standard seats for the final slot (2 for the run, 2 spare).
+  4. Only if Standard runs out: create a new concert as in step 1 of the run sheet, with "Sale opens" about
+     15 minutes ahead (the API only accepts a future sale start, and ticket types, layout and publish must be done
+     before the sale opens; after that `409 layout_locked`), and put its organiser URL into tab 2.
 - [ ] **Dress rehearsal** of the whole script, with a screen recording (QuickTime → New Screen Recording) saved on
   the presenter laptop's desktop as `demo-full-run.mov`, and the screenshots in [Fallback assets](#fallback-assets)
   saved to `docs/report/evidence/demo/`.
@@ -98,7 +90,7 @@ one session per browser profile).
   skips straight to "You're in!", which hides the queue. A hold lasts **10 minutes**, and a fan can have only one
   active hold per concert. The last rehearsal must end at least 15 minutes before the slot, and any hold must be
   released ("Change seats") or expired. Otherwise use the backup fan.
-- [ ] Enough CAT1 seats left in row A or B (each run sells 2).
+- [ ] Enough Standard seats left (each run sells 2; 38 on 6 Nov).
 
 ### Ten minutes before (T-10 min)
 
@@ -118,11 +110,12 @@ one session per browser profile).
 |---|---|---|---|
 | 0:00 | Elroy runs the alarm command; Nai Xin introduces (slide 13 notes) | Nai Xin | — |
 | 0:20 | 1. Organiser creates and publishes a concert (UC5) | Elroy | Skip to step 2; show `demo-02` |
-| 1:30 | 2. Live sales dashboard of the demo concert (UC5) | Elroy | — |
-| 1:50 | 3. Fan signs in and browses (UC1) | Cody, Nai Xin | Skip the search |
-| 2:30 | 4. Waiting room: queued, then admitted (UC3) | Yan Ting | — (the wait is fixed by the schedule) |
-| 3:30 | 5. Seats, hold, payment (UC4) | Shi Hui | Skip the organiser "Held" check |
-| 4:30 | 6. My Tickets, ticket, PDF, email (UC2 + ticket-fn) | Andrew | Skip opening the PDF |
+| 1:20 | 2. Live sales dashboard of the demo concert (UC5) | Elroy | — |
+| 1:40 | 2b. Sales reports (UC5 reporting service) | Elroy | Show `demo-18` |
+| 2:00 | 3. Fan signs in and browses (UC1) | Cody, Nai Xin | Skip the search |
+| 2:35 | 4. Waiting room: queued, then admitted (UC3) | Yan Ting | — (the wait is fixed by the schedule) |
+| 3:35 | 5. Seats, hold, payment (UC4) | Shi Hui | Skip the organiser "Held" check |
+| 4:35 | 6. My Tickets, ticket, PDF, email (UC2 + ticket-fn) | Andrew | Skip opening the PDF |
 | 5:05 | 7. CloudWatch dashboard and alarm email | Elroy | Show only the email |
 | 5:30 | Back to slides (slide 14) | Elroy | — |
 
@@ -134,7 +127,7 @@ one session per browser profile).
   The ALARM email will be waiting in the alert inbox by step 7.
 - **Say (Nai Xin):** slide 13 notes.
 
-### 1. UC5: organiser creates and publishes a concert (0:20–1:30)
+### 1. UC5: organiser creates and publishes a concert (0:20–1:20)
 
 - **Do:** Organiser profile, tab 1 ("My concerts") → click **"+ New concert"**.
 - **Audience sees:** form "New concert", "Saved as a draft. Add ticket types and a seat layout next, then publish."
@@ -153,22 +146,31 @@ one session per browser profile).
 - **Audience sees:** status "Published", a "View public page" button, and a "Sales" panel: "Sold 0 / 20",
   "Held in checkout 0", "Available 20", "Revenue $0".
 - **Say (Elroy):** only the `organisers` Cognito group can reach this page, and the API checks the group again.
-  The layout is saved in one transaction, and publish refuses unless every ticket has exactly one seat. Once the
-  sale opens, ticket types and layout lock, in the service and in database triggers.
+  Publish refuses unless every ticket has exactly one seat; once the sale opens, ticket types and layout lock.
 - **If it fails:** show `demo-01-organiser-create.png` and `demo-02-organiser-published.png`, then go to step 2.
 
-### 2. UC5: live dashboard of the demo concert (1:30–1:50)
+### 2. UC5: live dashboard of the demo concert (1:20–1:40)
 
 - **Do:** Organiser tab 2 (TicketMastery Demo Night).
 - **Audience sees:** status "Published", the banner "Ticket types and the seat layout are locked because the sale
   has started.", and the "Sales" panel with "Live · updated <time>" and the table Ticket type / Sold / Held /
-  Available / Revenue for CAT1 and CAT2.
+  Available / Revenue for Standard and VIP; the panel totals "Sold x / 50".
 - **Say (Elroy):** this is the concert the fan is about to buy from. Its sale is open, so the layout is locked. The
   panel polls every 5 seconds and counts straight from the seat rows that checkout updates. Keep an eye on "Held in
   checkout".
 - **If it fails:** `demo-03-organiser-dashboard.png`.
 
-### 3. UC1: fan signs in and browses (1:50–2:30)
+### 2b. UC5: sales reports (1:40–2:00)
+
+- **Do:** Organiser profile → header "Organiser" → **"Sales reports"** (`/organiser/reports`); range **"Last 7 days"**.
+- **Audience sees:** KPI cards (gross revenue, tickets, orders, average order), the revenue-by-day chart, revenue by
+  concert, ticket types, seat status and recent orders, each with a CSV download.
+- **Say (Elroy):** this page is served by its own ECS service, `reporting`. It logs in to the database as
+  `reporting_ro`, which can only read five reporting views, and only this organiser's rows. The data is live: the
+  sale we make in a minute shows up here at once.
+- **If it fails:** `demo-18-organiser-reports.png`.
+
+### 3. UC1: fan signs in and browses (2:00–2:35)
 
 - **Do:** Fan profile, tab 1. Header → **"Sign in"**.
 - **Audience sees:** "TicketMastery account" / "Sign in" with fields "Email" and "Password".
@@ -176,16 +178,17 @@ one session per browser profile).
 - **Audience sees:** home page "Hello Demo Fan", "Find your next live night.", the search box "Search all events…"
   and "Upcoming Events" with "N shows" and the concert cards.
 - **Do:** type `Demo` in "Search all events…".
-- **Audience sees:** the card "TicketMastery Demo Night", "Singapore Indoor Stadium · <time>", "From $88".
+- **Audience sees:** the card "TicketMastery Demo Night", "Esplanade Concert Hall · <time>", "From $88".
 - **Do:** click the card.
 - **Audience sees:** artist "The Cloud Engineers", "TicketMastery Demo Night", "When" / "Where", the green banner
-  "On sale now until <date>.", a **"Get tickets"** button, "Tickets" (CAT1 "$88" "N of 40 left", CAT2 "$128"
-  "N of 20 left"), and "Seat map" with "Stage", rows A–C and the legend "Held" / "Sold".
+  "On sale now until <date>.", a **"Get tickets"** button, "Tickets" (Standard "$88" "N of 40 left", VIP "$168"
+  "N of 10 left"; on 6 Nov 38 and 10 were left), and "Seat map" with "Stage", section Stalls (rows A–D, Standard)
+  and section Box (row V, VIP), and the legend "Held" / "Sold".
 - **Say (Cody, Nai Xin):** browsing is public and cacheable; the seat map is never cached and refreshes every
   15 seconds during a sale. Sold seats from earlier runs are greyed out.
 - **If it fails:** `demo-04-home.png`, `demo-05-concert-detail.png`. If sign-in fails, switch to the backup fan.
 
-### 4. UC3: waiting room (2:30–3:30)
+### 4. UC3: waiting room (2:35–3:35)
 
 - **Do:** click **"Get tickets"** (goes to `/concerts/<id>/waiting-room`).
 - **Audience sees:** "Waiting room · The Cloud Engineers", the concert title, then a spinner with "Assigning your
@@ -210,14 +213,14 @@ one session per browser profile).
   - Not admitted after 90 s: keep talking for one more minute (one more scheduled run); then show `demo-07` and
     switch the rest of the demo to the recording.
 
-### 5. UC4: seats, hold and payment (3:30–4:30)
+### 5. UC4: seats, hold and payment (3:35–4:35)
 
 - **Do:** click **"Continue to seat selection"**.
 - **Audience sees:** steps "1 Select seats · 2 Checkout · 3 Confirmation", the seat map (seat-number buttons per
-  row, "Stage"), the legend "CAT1 $88.00", "CAT2 $128.00", "Selected", "Unavailable", and an "Order summary" box
+  row, "Stage"), the legend "Standard $88.00", "VIP $168.00", "Selected", "Unavailable", and an "Order summary" box
   with "Select seats on the map." and a disabled **"Checkout"** button.
-- **Do:** click two free CAT1 seats next to each other in row A or B.
-- **Audience sees:** order summary lines "Floor · Row A · Seat <n>" (CAT1, $88.00) ×2, "Subtotal $176.00",
+- **Do:** click two free Standard seats next to each other in Stalls (rows A–D).
+- **Audience sees:** order summary lines "Stalls · Row A · Seat <n>" (Standard, $88.00) ×2, "Subtotal $176.00",
   "Booking fee ($4.00 × 2) $8.00", "Total $184.00", "Your seats are reserved for 10 minutes while you pay."
 - **Do:** **"Checkout"**.
 - **Audience sees:** step 2: "Your seats are reserved for **9:5x**", "Complete payment before the timer runs
@@ -248,15 +251,15 @@ one session per browser profile).
     countdown, so pay that one.
   - Sent back to the waiting room: the admission was missing or expired; show `demo-08` to `demo-11` instead.
 
-### 6. UC2: My Tickets, ticket page, PDF and email (4:30–5:05)
+### 6. UC2: My Tickets, ticket page, PDF and email (4:35–5:05)
 
 - **Do:** header → **"My Tickets"** (`/myaccount`).
 - **Audience sees:** "My Tickets", "Upcoming", a row "TicketMastery Demo Night", "<DATE> · <TIME>",
-  "Singapore Indoor Stadium · 2 seats", "View ticket ›", and below it the "Profile" card (Email, Display name,
+  "Esplanade Concert Hall · 2 seats", "View ticket ›", and below it the "Profile" card (Email, Display name,
   "Save profile"). A fan with no orders would see "No tickets yet. Find a concert to get started."
 - **Do:** click the new row (the top one if there are several from rehearsals).
 - **Audience sees:** "Ticket" with the concert title and artist, "Date", "Time", "Venue", "Order" (first 8
-  characters of the order ID), "Seats" with "Floor · Row A · Seat <n>" "CAT1 · $88.00", "Booking fee $8.00",
+  characters of the order ID), "Seats" with "Stalls · Row A · Seat <n>" "Standard · $88.00", "Booking fee $8.00",
   "Total paid $184.00", and **"⤓ Download e-ticket (PDF)"**.
 - **Do:** **"⤓ Download e-ticket (PDF)"** (shows "Preparing…"), then open `ticketmastery-<orderId>.pdf` from
   Chrome's Downloads.
@@ -266,9 +269,8 @@ one session per browser profile).
 - **Audience sees:** from "TicketMastery", subject **"Your e-ticket: TicketMastery Demo Night"**, body starting
   "Thank you for your order. Your e-ticket is attached as a PDF.", the seats, "Total paid: SGD 184.00", the full
   order ID, and the attachment `ticketmastery-<orderId>.pdf`.
-- **Say (Andrew):** this page only returns orders that belong to the signed-in fan; anyone else's order ID answers
-  not found. The PDF lives in a private bucket: the API checks it exists, then hands the browser a pre-signed link
-  valid for five minutes, and the file comes straight from S3. The email came from the same Lambda.
+- **Say (Andrew):** this page only returns orders that belong to the signed-in fan. The PDF lives in a private
+  bucket; the browser gets a pre-signed link valid for five minutes. The email came from the same Lambda.
 - **If it fails:**
   - "Your e-ticket is still being prepared. Try again in a minute.": the PDF isn't written yet (`409`). Open the
     email first, then retry the download.
@@ -281,8 +283,8 @@ one session per browser profile).
 - **Do:** Organiser tab 2 for 3 seconds: "Sold" is up by 2 and "Held in checkout" is back down.
 - **Do:** Organiser tab 3 (CloudWatch dashboard `ticketmastery-dev`); refresh.
 - **Audience sees:** the alarm-status panel and the graphs with threshold lines, e.g. API Gateway requests with the
-  demo's traffic, ALB latency, ECS CPU, ticket-queue age and e-ticket delivery latency. The forced alarm
-  `ticketmastery-dev-join-dlq-not-empty` shows ALARM until its next evaluation, then OK.
+  demo's traffic, ALB latency, ECS CPU (one line per service), ticket-queue age and e-ticket delivery latency. The
+  forced alarm `ticketmastery-dev-join-dlq-not-empty` shows ALARM until its next evaluation, then OK.
 - **Do:** Organiser tab 4 (alert inbox); open the newest email from AWS Notifications.
 - **Audience sees:** the SNS alarm email for `ticketmastery-dev-join-dlq-not-empty` with the reason "Live demo: alert
   email test". The usual subject format is `ALARM: "ticketmastery-dev-join-dlq-not-empty" in Asia Pacific
@@ -302,8 +304,10 @@ Do not debug on stage. For a single failed step, use that step's screenshot and 
 
 Take these during the dress rehearsal and save them to `docs/report/evidence/demo/`. The slides reuse some of them.
 `demo-01` to `demo-14` were taken on 3 Nov 2026 on cancelled rehearsal copies of the two concerts (test organiser and
-a test fan named "Demo Fan"); retake them at the dress rehearsal only if the UI changes. `demo-15` to `demo-17` and
-the recording need the real inboxes and console, so they are still to take.
+a test fan named "Demo Fan"). That earlier rehearsal concert used **Singapore Indoor Stadium** with **CAT1/CAT2**,
+so those screenshots show a different venue and ticket names from the live concert (Esplanade Concert Hall,
+Standard/VIP); say so if you use one. `demo-18` was taken on 6 Nov. `demo-15` to `demo-17` and the recording need
+the real inboxes and console, so they are still to take.
 
 | File | Shows | Step / slide |
 |---|---|---|
@@ -324,6 +328,7 @@ the recording need the real inboxes and console, so they are still to take.
 | `demo-15-eticket-email.png` | "Your e-ticket: TicketMastery Demo Night" with the attachment | 6 |
 | `demo-16-cloudwatch-dashboard.png` | Dashboard `ticketmastery-dev` | 7, slide 14 |
 | `demo-17-alarm-email.png` | ALARM email for `ticketmastery-dev-join-dlq-not-empty` | 7, slide 14 |
+| `demo-18-organiser-reports.png` | "Sales reports": KPI cards and revenue chart | 2b |
 | `demo-full-run.mov` | Whole run, start to finish (keep on the laptop; too large for the repo) | all |
 
 ## Reset
@@ -334,8 +339,9 @@ the recording need the real inboxes and console, so they are still to take.
   releases your reserved seats so others can book them."), or wait the 10 minutes.
 - **Admissions:** wait 15 minutes before the next run with the same fan, or use the backup fan.
 - **Concert created in step 1:** cancel it (below), so the public list doesn't fill with copies of "Encore Night".
-- **The demo concert stays.** Sold seats accumulate (60 seats, 2 per run). If CAT1 runs low, create a new demo
-  concert as in the T-1 checklist, at least 15 minutes before it is needed.
+- **The demo concert stays.** Sold seats accumulate (2 Standard per run; 38 Standard left on 6 Nov). If Standard
+  runs low, create a new demo concert as in the T-1 checklist, at least 15 minutes before it is needed.
+- **Reports:** nothing to do; the page reads live views and stores nothing.
 - **Forced alarm:** nothing to do; it returns to its real state (OK) on its next evaluation and sends an OK email.
   Check CloudWatch → Alarms before the next run.
 

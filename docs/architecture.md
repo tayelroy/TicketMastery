@@ -5,12 +5,23 @@ Region **ap-southeast-1 (Singapore)**. The network spans two Availability Zones.
 ## Summary
 
 - **Static site**: CloudFront + WAF → S3, a static SPA built from `frontend/` (deployed on the CloudFront domain; Route 53 with a custom domain is target design only).
-- **Dynamic API**: CloudFront → API Gateway HTTP API (Cognito JWT authorizer) → VPC link → **internal** Application Load Balancer in the private subnets → **one** ECS Fargate service, `ticketmastery-api` → RDS PostgreSQL in the private subnets. In the target HA design, the tasks run in the private subnets of both AZs and reach AWS APIs through a NAT gateway per AZ. In the implementation (the default `terraform.tfvars`), one task runs in the AZ a public subnet with a public IP and there is no NAT gateway.
-- **One service, five modules**: `ticketmastery-api` hosts the routes for UC1–UC5, one module per use case, mounted under `/api` (`/api/concerts` for discovery, `/api/me` for account, `/api/waiting-room`, `/api/checkout`, `/api/organiser`; see `src/modules/index.ts`). `/health` sits at the root. Each use case owns its module folder and its migrations.
+- **Dynamic API**: CloudFront → API Gateway HTTP API (Cognito JWT authorizer) → VPC link → **internal** Application Load Balancer in the private subnets → **six** ECS Fargate services (one per feature, one path rule and target group each) → RDS PostgreSQL in the private subnets. In the target HA design, every service runs at least 2 tasks across the private subnets of both AZs and reaches AWS APIs through a NAT gateway per AZ. In the implementation (the default `terraform.tfvars`), each service runs one task in the AZ a public subnet with a public IP and there is no NAT gateway.
+- **Six services, one image**: all six services run the same `ticketmastery-api` image; the `API_MODULES` environment variable selects which module a task mounts. Each service is 0.25 vCPU / 0.5 GB with its own target group, ALB path rule and autoscaling policy (CPU 60% + ALB requests per target; `ecs_services` in `infra/envs/dev/variables.tf`). Each use case owns its module folder (`src/modules/<uc>/`) and its migrations.
+
+  | Service | Use case | ALB paths | Autoscaling max | DB login |
+  |---|---|---|---|---|
+  | `discovery` | UC1 | `/api/concerts*`, `/health` (ALB default) | 3 | master (RDS-managed secret) |
+  | `account` | UC2 | `/api/me*` | 2 | master |
+  | `waiting-room` | UC3 | `/api/waiting-room/*` | 3 | master |
+  | `checkout` | UC4 | `/api/checkout/*` | 3 | master |
+  | `organiser` | UC5 | `/api/organiser/*` | 2 | master |
+  | `reporting` | UC5 reports | `/api/reports/*` | 2 | `reporting_ro` (secret `ticketmastery-dev/reporting/reporting-ro`) |
+
+  Migrations run only in the five master-login services (advisory lock). `reporting` has `RUN_MIGRATIONS_ON_START=false` and `DB_POOL_MAX=4` (2 tasks × 4 = 8, within the role's connection limit of 10). The task role is still shared by all six services; per-service task roles are the next step.
 - **Waiting room (UC3)**: the API enqueues fans to SQS FIFO `join-queue`; the `queue-manager` Lambda assigns queue numbers in DynamoDB `live-queue`. EventBridge Scheduler runs `queue-manager` every minute (optionally limited to the sale window). Each run admits the next 500 waiting fans per concert for 15 minutes. Checkout's hold endpoint answers `403 not_admitted` until the fan's `live-queue` row is admitted.
 - **E-tickets (UC4)**: an order is confirmed in RDS, then the API publishes to SNS `order-events` → SQS `ticket-queue` (DLQ `ticket-dlq` after 5 tries) → the `ticket-fn` Lambda writes the PDF to private S3 and emails it via SES. UC2 (My Tickets) hands out 5-minute pre-signed download links to that PDF.
-- **Organisers (UC5)**: organisers use the same Cognito pool and are in the `organisers` group. The API checks the group before create, edit, or cancel. All seats are created in one RDS transaction. The layout locks once the sale opens. The dashboard polls every 5 s for available/held/sold counts from RDS. Reporting: five read-only SQL views in RDS (`0003_uc5_reporting_views.sql`); QuickSight on top of them is design only ([reporting.md](reporting.md)).
-- **Monitoring**: `infra/modules/monitoring` creates 19 CloudWatch alarms (20 with autoscaling on) on the ALB, ECS, RDS, API Gateway, SQS, Lambda and custom `TicketMastery` metrics (waiting-room size from `queue-manager`, checkout payment failures from API log metric filters), one CloudWatch dashboard, an SNS `alerts` topic with an email subscription, and an AWS Budgets monthly cost budget (USD 80; alerts at 20/40/60/80 actual and on forecast). Messaging adds a `ticket-dlq` alarm on the same topic.
+- **Organisers (UC5)**: organisers use the same Cognito pool and are in the `organisers` group. The API checks the group before create, edit, or cancel. All seats are created in one RDS transaction. The layout locks once the sale opens. The dashboard polls every 5 s for available/held/sold counts from RDS. Reporting: the `reporting` service serves `GET /api/reports/sales?days=7|30|90|all&concertId=` over five plain SQL views (`0003_uc5_reporting_views.sql`), always filtered to the calling organiser, with `Cache-Control: no-store`, so data is live. It logs in as `reporting_ro` (`0004`): SELECT on the five views only, `default_transaction_read_only=on`. The frontend shows it on **Sales reports** (`/organiser/reports`). QuickSight was designed and then removed: the AWS account is on the Free plan, which can't subscribe to QuickSight ([reporting.md](reporting.md)).
+- **Monitoring**: **30 CloudWatch alarms** (`infra/modules/monitoring` and `infra/modules/messaging`): per service no-healthy-hosts + at-max-capacity (12), busiest-service ECS CPU + memory via metric math MAX (2), ALB/API Gateway p95 + 5xx (4), checkout failure rate (1), waiting-room size + join DLQ (2), ticket-queue age + ticket DLQ (2), Lambda errors/throttles for both functions (4), RDS CPU/connections/storage (3). All go to the SNS `alerts` topic → email, on ALARM and OK. Breakdown: `docs/report/evidence/cloudwatch-alarms.md`. Also one CloudWatch dashboard (one line per service on the ECS graphs) and an AWS Budgets monthly cost budget (USD 80; alerts at 20/40/60/80 actual and on forecast).
 - **Seat holds (UC4)**: 10-minute, all-or-nothing holds through one atomic `UPDATE` with no double-booking. Expired holds can be reclaimed at once with `status = 'available' OR (status = 'held' AND hold_expires_at < now())`.
 
 ```mermaid
@@ -34,7 +45,7 @@ flowchart LR
     end
     subgraph priv["Private subnets, AZ a + AZ b"]
       alb[Internal ALB]
-      ecs["ECS Fargate<br/>ticketmastery-api<br/>UC1-UC5 routes<br/>2+ tasks across 2 AZs, autoscaling"]
+      ecs["ECS Fargate, 6 services<br/>discovery, account, waiting-room,<br/>checkout, organiser, reporting<br/>each 2+ tasks across 2 AZs, autoscaling"]
       rds[("RDS PostgreSQL<br/>Multi-AZ: primary + standby")]
     end
   end
@@ -55,9 +66,8 @@ flowchart LR
     ses[SES]
   end
 
-  qs["QuickSight<br/>(design only)"]
   ecr[(ECR ticketmastery-api)]
-  sm[(Secrets Manager<br/>RDS master secret)]
+  sm[(Secrets Manager<br/>RDS master secret +<br/>reporting-ro secret)]
 
   subgraph mon["Monitoring (Elroy)"]
     cw["CloudWatch<br/>alarms + dashboard"]
@@ -72,7 +82,7 @@ flowchart LR
   user -.->|sign in| cognito
   apigw -.->|validate JWT| cognito
   apigw -->|VPC link| alb --> ecs
-  ecs --> rds
+  ecs -->|"SQL: master login (5 services),<br/>reporting_ro, views only (reporting)"| rds
   ecs -.->|image pull, via NAT or endpoints| ecr
   ecs -.->|DB credentials| sm
   ecs -->|join| sqsfifo
@@ -85,7 +95,6 @@ flowchart LR
   tfn --> s3pdf
   tfn --> ses
   ecs -.->|UC2 download link| s3pdf
-  qs -.->|reporting views| rds
   cw -->|ALARM / OK| snsa --> email
   budgets --> email
 ```
@@ -96,24 +105,24 @@ At the proposal feedback (Oct 2026; recording at about 05:56–06:57) we asked w
 
 So there are two modes, and the Terraform defaults build the first one:
 
-- **Implementation (deployed; default `terraform.tfvars.example`)**: single-AZ, no NAT gateway, no HA. **One** Fargate task runs in the AZ a **public** subnet with a public IP. RDS is single-AZ and pinned to AZ a. Autoscaling is off.
-- **Target HA design (diagram + report; not deployed)**: tasks spread across two AZs in **private** subnets, a NAT gateway per AZ (or VPC interface endpoints), **Multi-AZ** RDS, and autoscaling. This is the diagram above.
+- **Implementation (deployed; default `terraform.tfvars.example`)**: single-AZ, no NAT gateway, no HA. Each of the six services runs **one** Fargate task in the AZ a **public** subnet with a public IP. RDS is single-AZ and pinned to AZ a. Autoscaling is configurable (`enable_autoscaling`, off in the example file); the live dev stack runs with it on, per-service max 2–3.
+- **Target HA design (diagram + report; not deployed)**: each of the six services runs at least 2 tasks spread across two AZs in **private** subnets, a NAT gateway per AZ (or VPC interface endpoints), **Multi-AZ** RDS, and autoscaling. This is the diagram above. HA stays design only because the instructor said the implementation doesn't need it.
 
 | Aspect | Implementation (default) | Target HA | Variable(s) to flip |
 |---|---|---|---|
 | Task subnets | AZ a public subnet only | Private subnets in AZ a + AZ b | `tasks_in_public_subnets = false`, `tasks_single_az = false` |
-| Task egress (ECR pull, CloudWatch Logs, Secrets Manager, Cognito JWKS) | The task's own public IP, through the internet gateway | NAT gateway per AZ, or VPC interface endpoints | `enable_nat_gateway = true` + `single_nat_gateway = false`, or `enable_vpc_endpoints = true` |
-| Task count | 1 task | At least 2 (one per AZ) | `desired_count = 2` |
-| Scaling | Off | CPU + ALB request-count target tracking, e.g. 2–4 tasks | `enable_autoscaling = true`, `autoscaling_min_capacity = 2`, `autoscaling_max_capacity = 4` (or more) |
+| Task egress (ECR pull, CloudWatch Logs, Secrets Manager, Cognito JWKS) | Each task's own public IP, through the internet gateway | NAT gateway per AZ, or VPC interface endpoints | `enable_nat_gateway = true` + `single_nat_gateway = false`, or `enable_vpc_endpoints = true` |
+| Task count | 1 task per service (6 tasks) | At least 2 per service, one per AZ (12 tasks) | `desired_count = 2` |
+| Scaling | Per service, CPU 60% + ALB requests per target, max 2–3 tasks (on in live dev; off in the example file) | Same target tracking, min 2 per service | `enable_autoscaling = true`, `autoscaling_min_capacity = 2`, `autoscaling_max_capacity = 4` (or more) |
 | Database | RDS single-AZ in AZ a, 1-day backups, no deletion protection | Multi-AZ (synchronous standby in AZ b, automatic failover), 7-day backups, deletion protection | `db_multi_az = true`, `db_backup_retention_period = 7`, `db_deletion_protection = true` |
 | Inbound path and security groups | API Gateway → VPC link → internal ALB (nodes in the private subnets of both AZs) → task. `alb_sg` allows port 80 only from the VPC link's SG; `ecs_sg` allows only the container port from `alb_sg`; `rds_sg` allows only 5432 from `ecs_sg` (+ `rds_extra_ingress_sg_ids`, e.g. `queue-manager`'s SG if it ever needs RDS) | Same | None |
-| Cost (ESTIMATE, whole stack) | ≈ USD 72/month | ≈ USD 194/month | See [cost-estimate.md](cost-estimate.md) |
+| Cost (ESTIMATE, whole stack) | ≈ USD 150/month | ≈ USD 311/month | See [cost-estimate.md](cost-estimate.md) |
 
 The commented "HA / target design" block at the bottom of `infra/envs/dev/terraform.tfvars.example` has all of these values. [deploy.md](deploy.md#switching-to-the-ha-target-design) describes the switch.
 
-**The task's public IP is not an open door.** `ecs_sg` has exactly one ingress rule (container port from `alb_sg`), so nothing on the internet can connect to the task directly. The public IP is only used for outbound calls. RDS stays in the private subnets with `publicly_accessible = false`.
+**The tasks' public IPs are not an open door.** `ecs_sg` has exactly one ingress rule (container port from `alb_sg`), so nothing on the internet can connect to a task directly. The public IPs are only used for outbound calls. RDS stays in the private subnets with `publicly_accessible = false`.
 
-**Why there are still two public and two private subnets.** An ALB (internal or internet-facing) needs subnets in at least two AZs, and an RDS DB subnet group must span at least two AZs even for a single-AZ instance. The network module therefore always creates one public and one private subnet in AZ a and AZ b. In implementation mode, the one task and the DB instance sit in AZ a. AZ b holds only the second node of the internal ALB, in private subnet b, which is also a member of the DB subnet group; public subnet b is empty. An AZ a outage therefore takes the whole API down. We accept that for the implementation, per the guidance above.
+**Why there are still two public and two private subnets.** An ALB (internal or internet-facing) needs subnets in at least two AZs, and an RDS DB subnet group must span at least two AZs even for a single-AZ instance. The network module therefore always creates one public and one private subnet in AZ a and AZ b. In implementation mode, the six tasks and the DB instance sit in AZ a. AZ b holds only the second node of the internal ALB, in private subnet b, which is also a member of the DB subnet group; public subnet b is empty. An AZ a outage therefore takes the whole API down. We accept that for the implementation, per the guidance above.
 
 Implementation mode (what `terraform apply` builds with the defaults):
 
@@ -122,11 +131,11 @@ flowchart LR
   apigw[API Gateway] -->|VPC link| alb
 
   subgraph vpc["VPC 10.20.0.0/16 - implementation mode (default tfvars)"]
-    alb["Internal ALB<br/>nodes in private subnets a + b"]
+    alb["Internal ALB, 6 path rules<br/>nodes in private subnets a + b"]
     igw[Internet gateway]
     subgraph aza["AZ a: everything that runs"]
       subgraph puba["Public subnet a"]
-        task["Fargate task x1<br/>ticketmastery-api<br/>public IP, inbound only from ALB SG"]
+        task["6 Fargate services x 1 task<br/>discovery, account, waiting-room,<br/>checkout, organiser, reporting<br/>public IPs, inbound only from ALB SG"]
       end
       subgraph priva["Private subnet a"]
         db[("RDS PostgreSQL<br/>single-AZ, pinned to AZ a")]
@@ -141,8 +150,8 @@ flowchart LR
   aws["ECR, CloudWatch Logs,<br/>Secrets Manager, Cognito JWKS"]
 
   alb --> task
-  task --> db
-  task -.->|"egress via its public IP, no NAT"| igw -.-> aws
+  task -->|"master login (5 services),<br/>reporting_ro (reporting)"| db
+  task -.->|"egress via the tasks' public IPs, no NAT"| igw -.-> aws
 ```
 
 ### Lambdas and the VPC (no NAT by default)
@@ -174,10 +183,10 @@ The base stack is Elroy's: `infra/` (`envs/dev`, `modules/{network,security,ecr,
 | VPC | `10.20.0.0/16`, 2 public + 2 private subnets in 2 AZs, IGW, free S3 + DynamoDB gateway endpoints. NAT gateway optional and **off by default** (`enable_nat_gateway`; one shared or one per AZ via `single_nat_gateway`). Interface endpoints optional (off) |
 | Security groups | `alb_sg` → `ecs_sg` → `rds_sg` chain; extra RDS ingress for VPC Lambdas through `rds_extra_ingress_sg_ids` |
 | ECR | `ticketmastery-api` repo, scan on push, lifecycle keeps the last 10 images |
-| RDS | PostgreSQL 16, `db.t4g.micro`, 20 GB gp3, **single-AZ by default**, master password managed by RDS in Secrets Manager |
-| ECS | Fargate cluster, task/execution roles, task definition, internal ALB (HTTP; reached through the API Gateway VPC link) with a target group on `/health`, service with circuit-breaker rollback. Task placement via `tasks_in_public_subnets` / `tasks_single_az` (default: 1 task in the AZ a public subnet). CPU/request autoscaling optional (off by default). ECS Exec on (`enable_execute_command`), for checks against RDS from inside the VPC |
-| API | Express + TypeScript, `pg`, migration runner with advisory lock, `/health`, dev-header or Cognito auth, all five use-case modules (UC1–UC5) and their migrations (`0001` UC5 schema, `0002` UC4 orders, `0003` UC5 reporting views) |
-| Monitoring (`modules/monitoring`) | 19 CloudWatch alarms (20 with autoscaling), one dashboard, SNS `alerts` topic + email subscription, 2 log metric filters (checkout payment attempts/failures), AWS Budgets monthly budget (USD 80). Details: `infra/modules/monitoring/README.md` |
+| RDS | PostgreSQL 16, `db.t4g.micro`, 20 GB gp3, **single-AZ by default**, master password managed by RDS in Secrets Manager. Second secret `ticketmastery-dev/reporting/reporting-ro` for the read-only `reporting_ro` role, created empty by Terraform and filled inside the VPC by `loadtest/scripts/reporting-user.sh`, so no password is in code or Terraform state |
+| ECS | Fargate cluster `ticketmastery-dev-cluster`, six services from the `ecs_services` map (one task definition, target group and ALB path rule each, circuit-breaker rollback; services ignore `desired_count` after creation because autoscaling owns it), shared task/execution roles, internal ALB (HTTP; reached through the API Gateway VPC link), `discovery` as the default target group with `/health`. Task placement via `tasks_in_public_subnets` / `tasks_single_az` (default: 1 task per service in the AZ a public subnet). Per-service CPU/request autoscaling (`enable_autoscaling`). ECS Exec on (`enable_execute_command`), for checks against RDS from inside the VPC |
+| API | Express + TypeScript, `pg`, migration runner with advisory lock, `/health`, dev-header or Cognito auth, the use-case modules (UC1–UC5 + reporting; `API_MODULES` picks one per service) and their migrations (`0001` UC5 schema, `0002` UC4 orders, `0003` UC5 reporting views, `0004` `reporting_ro` role) |
+| Monitoring (`modules/monitoring`) | CloudWatch alarms (30 in total with the `messaging` ones), one dashboard, SNS `alerts` topic + email subscription, 2 log metric filters (checkout payment attempts/failures), AWS Budgets monthly budget (USD 80). Details: `infra/modules/monitoring/README.md` |
 
 | Teammates' modules | Owner | Location |
 |---|---|---|
@@ -189,12 +198,12 @@ The base stack is Elroy's: `infra/` (`envs/dev`, `modules/{network,security,ecr,
 | UC1–UC4 API modules + migrations | Cody & Nai Xin / Andrew / Yan Ting / Shi Hui | `services/ticketmastery-api/src/modules/*` |
 | Frontend SPA | Nai Xin | `frontend/` |
 
-Not deployed: QuickSight (UC5 reporting is design only, see [instructor feedback e](#instructor-feedback-and-how-we-addressed-it) and [reporting.md](reporting.md)), Route 53, KMS customer-managed keys.
+Not deployed: QuickSight (designed and built in Terraform, then removed because the AWS Free-plan account can't subscribe; the `reporting` service replaces it, see [instructor feedback e](#instructor-feedback-and-how-we-addressed-it) and [reporting.md](reporting.md)), Route 53, KMS customer-managed keys.
 
 ## Decision: single-AZ RDS
 
-- **Decision**: RDS runs **single-AZ** by default (`db_multi_az = false`) and is pinned to AZ a, next to the API task. The professor confirmed single-AZ is acceptable for this project, and at the proposal feedback said HA isn't needed for the implementation at all (see [above](#implementation-vs-target-ha-design)). The report still shows Multi-AZ as the target. A Multi-AZ instance roughly doubles the instance and storage cost (see [cost-estimate.md](cost-estimate.md)).
-- **Trade-off**: if AZ a fails, the database is down until AWS recovers the AZ or we restore elsewhere. In implementation mode the API task is in the same AZ, so the whole API is down too. In the HA design the tasks in AZ b would stay up, but every DB-backed route would still fail without Multi-AZ. Mitigations:
+- **Decision**: RDS runs **single-AZ** by default (`db_multi_az = false`) and is pinned to AZ a, next to the API tasks. The professor confirmed single-AZ is acceptable for this project, and at the proposal feedback said HA isn't needed for the implementation at all (see [above](#implementation-vs-target-ha-design)). The report still shows Multi-AZ as the target. A Multi-AZ instance roughly doubles the instance and storage cost (see [cost-estimate.md](cost-estimate.md)).
+- **Trade-off**: if AZ a fails, the database is down until AWS recovers the AZ or we restore elsewhere. In implementation mode all API tasks are in the same AZ, so the whole API is down too. In the HA design the tasks in AZ b would stay up, but every DB-backed route would still fail without Multi-AZ. Mitigations:
   - automated backups with point-in-time restore (`db_backup_retention_period`, default 1 day in dev);
   - restore to a new instance in the healthy AZ.
 
@@ -222,10 +231,10 @@ Raised at the proposal feedback (Oct 2026).
 | # | Feedback | What we did | Owner |
 |---|---|---|---|
 | a | Put **API Gateway** in front of Fargate so all APIs are managed centrally. | Done. CloudFront `/api/*` → API Gateway HTTP API (Cognito JWT authorizer, stage throttling, access logs) → VPC link → internal ALB → Fargate. The ALB has no public entry; see [API Gateway → ALB integration](#api-gateway--alb-integration-decided-b-vpc-link). | Andrew |
-| b | Consider splitting the monolith into **per-feature containers / ECS services** (e.g. concert discovery/browse vs seat selection/checkout), so each has its own scaling policy and lifecycle. She said a monolith isn't wrong; it just has to scale as a whole. | Kept one service, deliberately. The module-per-use-case layout (`src/modules/<uc>/`, per-UC migrations, no cross-module imports) keeps a later split cheap: each module could become its own ECS service with its own target group behind an ALB path rule (e.g. `/api/concerts*` → discovery). That needs the `ecs-service` module to accept a shared cluster/ALB instead of creating its own. Trade-off: one scaling policy for all routes now, versus more services, target groups and deploys to run. The waiting room already shields checkout from the on-sale spike, which is the main reason to scale checkout separately. | Team; Elroy for infra |
+| b | Consider splitting the monolith into **per-feature containers / ECS services** (e.g. concert discovery/browse vs seat selection/checkout), so each has its own scaling policy and lifecycle. She said a monolith isn't wrong; it just has to scale as a whole. | **Done.** Six ECS services from one image (`discovery`, `account`, `waiting-room`, `checkout`, `organiser`, `reporting`), each with its own target group, ALB path rule, task definition and autoscaling policy (max 2–3 tasks); `API_MODULES` selects the module per service. The module-per-use-case layout (`src/modules/<uc>/`, per-UC migrations, no cross-module imports) kept the split small. In the 6 Nov browse burst (10 → 100 req/s) only `discovery` scaled (1 → 3 tasks), with 0 dropped requests. Still shared: one task role for all services (per-service roles are the next step). | Team; Elroy for infra |
 | c | **DynamoDB** is the usual store for dynamic session data, such as live queue numbers and the 10-minute payment/hold session. Postgres is acceptable ("technically nothing wrong"). | Live queue numbers and admissions are in DynamoDB `live-queue` (UC3). Seat holds stay in Postgres on purpose: one atomic `UPDATE` in the same database as the seats and orders is what guarantees no double-booking, and the order is confirmed in the same transaction that marks the seats sold. Splitting the hold into DynamoDB would need a cross-store protocol for the same guarantee. | Yan Ting, Shi Hui |
 | d | **EventBridge** running every minute costs money; check it. | Built: an EventBridge Scheduler schedule runs `queue-manager`'s admit step every minute, and it can be limited to a sale window (`admit_schedule_start_date` / `admit_schedule_end_date`) or switched off (`admit_schedule_enabled`). Every minute all month is ≈ 43,800 invocations, inside the Scheduler free tier (14 M/month) and Lambda's free 1 M requests/month; cost reasoning in `infra/modules/waiting-room/README.md`. | Yan Ting |
-| e | UC5 needs **internal reporting / data statistics** for organisers, e.g. QuickSight. | Data layer built: five read-only reporting views in RDS (`0003_uc5_reporting_views.sql`: sales by concert, ticket type and day, seat status, confirmed orders), next to the live dashboard endpoint (`GET /api/organiser/concerts/:id/dashboard`). QuickSight on top is **design only** because it bills per user per month; design, pricing and setup steps in [reporting.md](reporting.md). | Elroy |
+| e | UC5 needs **internal reporting / data statistics** for organisers, e.g. QuickSight. | **Done (no BI tool).** Five read-only reporting views in RDS (`0003_uc5_reporting_views.sql`: sales by concert, ticket type and day, seat status, confirmed orders), served live by the `reporting` ECS service (`GET /api/reports/sales`), which logs in as the read-only `reporting_ro` role (`0004`). Organisers see it on the **Sales reports** page (KPI cards, revenue charts, CSV download). QuickSight was designed and built in Terraform, then removed: the account is on the AWS Free plan, and the QuickSight subscription call fails there. Design only: an RDS read replica for reporting at production scale. Details in [reporting.md](reporting.md). | Elroy |
 
 We also raised the **AWS credits** status at the feedback session.
 
