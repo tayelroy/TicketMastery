@@ -33,7 +33,7 @@ There are five of us and one AWS account. These rules keep us from overwriting e
 
   Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`, `infra`. The scope is the use case (`uc1`–`uc5`) or the area (`infra`, `api`, `frontend`, `lambdas`).
 - Keep PRs small: one concern each, roughly under 400 changed lines. Split schema, API, and Terraform changes into separate PRs when you can.
-- Before merging, **rebase on `main`** (`git fetch && git rebase origin/main`) and make sure checks still pass. Force-push to your own branch with `--force-with-lease`. Never force-push to a branch someone else is working on.
+- Before merging, **rebase on `main`** (`git fetch && git rebase origin/main`) and make sure checks still pass: the `CI` workflow (`.github/workflows/ci.yml`) runs the API typecheck and tests against Postgres 16 with the coverage gate, the ticket-fn and queue-manager tests (and checks the committed ticket-fn bundle is current), and `terraform fmt -check` + `validate`. Force-push to your own branch with `--force-with-lease`. Never force-push to a branch someone else is working on.
 - Every PR needs **at least one approving review from a CODEOWNER of each path it touches** (see [`.github/CODEOWNERS`](.github/CODEOWNERS)). Your own approval doesn't count. GitHub only enforces this once branch protection on `main` has "Require review from Code Owners" turned on.
 - **Squash merge** only. Delete the branch after merging.
 - Fill in the [PR template](.github/pull_request_template.md).
