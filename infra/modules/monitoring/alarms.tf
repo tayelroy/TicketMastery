@@ -437,3 +437,23 @@ resource "aws_cloudwatch_metric_alarm" "checkout_failure_rate" {
 
   tags = var.tags
 }
+
+# NFR-7: 95% of e-tickets emailed within 60 s of payment. ticket-fn writes one datapoint per sent email (EMF), so
+# no data means no sales, which is fine. The oldest-message alarm catches a stalled pipeline; this one catches a
+# slow but moving one (e.g. SES throttling in the sandbox).
+resource "aws_cloudwatch_metric_alarm" "eticket_delivery_latency" {
+  alarm_name          = "${var.name}-eticket-delivery-latency"
+  alarm_description   = "p95 e-ticket delivery (payment to SES accepted) above ${var.eticket_latency_p95_ms / 1000} s over 5 minutes (NFR-7). Check ticket-fn errors, SES sending limits and ticket-queue age."
+  namespace           = "TicketMastery"
+  metric_name         = "ETicketDeliveryLatency"
+  extended_statistic  = "p95"
+  period              = 300
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = var.eticket_latency_p95_ms
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+  ok_actions          = local.alarm_actions
+
+  tags = var.tags
+}

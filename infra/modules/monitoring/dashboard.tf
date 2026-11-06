@@ -28,6 +28,7 @@ locals {
     [for k in sort(keys(aws_cloudwatch_metric_alarm.lambda)) : aws_cloudwatch_metric_alarm.lambda[k]],
     [
       aws_cloudwatch_metric_alarm.waiting_room_size,
+      aws_cloudwatch_metric_alarm.eticket_delivery_latency,
       aws_cloudwatch_metric_alarm.checkout_failure_rate,
     ],
   )
@@ -185,15 +186,14 @@ locals {
       left_label  = "Seconds"
     },
     {
-      # ticket-fn writes this per sent e-ticket email (EMF, no dimensions). Evidence for "e-tickets arrive within
-      # seconds"; no alarm, the oldest-message alarm already catches a stalled pipeline.
+      # ticket-fn writes this per sent e-ticket email (EMF, no dimensions): NFR-7, e-tickets within 60 s.
       title = "E-ticket delivery latency (ticket-fn)"
       metrics = [
         ["TicketMastery", "ETicketDeliveryLatency", { stat = "p95", label = "p95" }],
         ["TicketMastery", "ETicketDeliveryLatency", { stat = "Maximum", label = "max" }],
       ]
       period      = 300
-      annotations = []
+      annotations = [{ label = "NFR-7 alarm (p95)", value = var.eticket_latency_p95_ms }]
       left_label  = "Milliseconds"
     },
     {

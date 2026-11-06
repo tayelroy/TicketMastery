@@ -130,6 +130,12 @@ variable "ticket_queue_max_age_seconds" {
   default     = 60
 }
 
+variable "eticket_latency_p95_ms" {
+  description = "NFR-7: alarm when the p95 of TicketMastery/ETicketDeliveryLatency over 5 minutes exceeds this (ms)."
+  type        = number
+  default     = 60000
+}
+
 variable "waiting_room_size_threshold" {
   description = "Alarm when TicketMastery/WaitingRoomSize exceeds this many fans."
   type        = number
