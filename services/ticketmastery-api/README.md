@@ -118,6 +118,7 @@ conflict -> 409.
 | `/api/waiting-room` | `waiting-room` | UC3 Virtual waiting room | Yan Ting | implemented (join, status); `501` when its env vars are unset |
 | `/api/checkout` | `checkout` | UC4 Seat selection & checkout | Shi Hui | implemented (seat map, hold, release, confirm; `403 not_admitted` until the waiting room admits the fan) |
 | `/api/organiser` | `organiser` | UC5 Concert & ticket management | Elroy | implemented |
+| `/api/reports` | `reporting` | UC5 Internal reporting | Elroy | implemented (sales report over the `report_*` views; in AWS connects as the read-only `reporting_ro` role) |
 
 Each module has a `README.md` with its endpoints.
 
@@ -132,7 +133,9 @@ Each module has a `README.md` with its endpoints.
 3. Protect routes with `authenticate` plus `requireUser` (any signed-in user) or `requireGroup('<group>')`
    (`src/auth`). Read the caller from `req.user` (`sub`, `groups`), never from `x-dev-user-*` headers.
 4. New module: add `{ key, basePath, router, useCase, owner }` to `src/modules/index.ts` and the key to
-   `src/modules/keys.ts`; for AWS add a service for it in `infra/envs/dev` (`ecs_services`).
+   `src/modules/keys.ts`; for AWS add a service for it in `infra/envs/dev` (`ecs_services`), the key to the
+   `services[*].modules` validation in `infra/modules/ecs-service/variables.tf`, and its `/api/<prefix>` routes to
+   `infra/modules/auth-apigw/apigw.tf` (unlisted paths get API Gateway's 404).
 5. Seat holds (UC4): use `src/db/seat-holds.ts`, not hand-written variants.
 
 ### Adding a migration
@@ -160,7 +163,7 @@ instead of stopping start-up.
 | `ALLOW_DEV_AUTH` | `false` | must be `true` to run `dev-header` with `NODE_ENV=production`; logs a warning |
 | `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID` | unset | required with `AUTH_MODE=cognito`; Terraform sets them from `module.auth_apigw` |
 | `RUN_MIGRATIONS_ON_START` | `false` | migrate (advisory-locked) before listening |
-| `API_MODULES` | unset (all) | comma-separated module keys to mount (`discovery,account,waiting-room,checkout,organiser`); unknown key = start-up fails. Terraform sets one per ECS service |
+| `API_MODULES` | unset (all) | comma-separated module keys to mount (`discovery,account,waiting-room,checkout,organiser,reporting`); unknown key = start-up fails. Terraform sets one per ECS service |
 | `ORDER_EVENTS_TOPIC_ARN` | unset | UC4: SNS `order-events` topic for `OrderConfirmed`; unset = event only logged |
 | `TICKET_PDF_BUCKET` | unset | UC2: private S3 bucket with the e-ticket PDFs (UC4's; the API needs `s3:GetObject` + `s3:ListBucket`); unset = downloads answer `503` |
 | `WAITING_ROOM_JOIN_QUEUE_URL` | unset | UC3: SQS FIFO `join-queue` for `POST /api/waiting-room/:id/join` (`sqs:SendMessage`); unset = both waiting-room routes answer `501` |

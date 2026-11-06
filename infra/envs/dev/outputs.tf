@@ -71,7 +71,7 @@ output "ecs_cluster_name" {
 }
 
 output "ecs_service_names" {
-  description = "ECS service name per service key (discovery, account, waiting-room, checkout, organiser), e.g. for `aws ecs update-service --force-new-deployment`: terraform output -json ecs_service_names | jq -r '.checkout'."
+  description = "ECS service name per service key (discovery, account, waiting-room, checkout, organiser, reporting), e.g. for `aws ecs update-service --force-new-deployment`: terraform output -json ecs_service_names | jq -r '.checkout'."
   value       = module.ecs_service.service_names
 }
 
@@ -127,6 +127,11 @@ output "db_availability_zone" {
 output "db_secret_arn" {
   description = "Secrets Manager ARN of the RDS-managed master credentials (JSON keys username, password). Grant secretsmanager:GetSecretValue on this ARN; never copy the value into code."
   value       = module.rds.master_user_secret_arn
+}
+
+output "reporting_db_secret_arn" {
+  description = "Secrets Manager ARN of the reporting_ro login the reporting ECS service uses (JSON keys username, password). Created empty by Terraform; loadtest/scripts/reporting-user.sh writes the value."
+  value       = module.rds.reporting_ro_secret_arn
 }
 
 output "frontend_bucket_name" {

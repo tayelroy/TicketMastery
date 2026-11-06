@@ -1,7 +1,8 @@
 # pages/organiser — UC5 Concert & ticket management
 
 **Owner:** Elroy (API) · page built by Nai Xin
-**Calls:** `/api/organiser` (API module `services/ticketmastery-api/src/modules/organiser/`)
+**Calls:** `/api/organiser` (API module `services/ticketmastery-api/src/modules/organiser/`) and, for the reports
+page, `/api/reports` (API module `services/ticketmastery-api/src/modules/reporting/`, its own ECS service)
 **Status:** built against the real API, signed in with the dev login (Cognito later; no page changes needed).
 
 ## Routes
@@ -17,7 +18,7 @@
   - **View report** (once published) opens the reports page for this concert
 - `/organiser/reports?days=7|30|90|all&concert=<id>` (`OrganiserReportsPage.tsx`): sales reports (UC5 internal
   reporting). Period buttons (last 7 / 30 / 90 days, all time; default 30) and a concert select (all concerts or one)
-  are kept in the URL, so links and reloads keep them. Sections, all from one `GET /reports/sales` call:
+  are kept in the URL, so links and reloads keep them. Sections, all from one `GET /api/reports/sales` call:
   - summary KPIs per currency: gross revenue, tickets sold, orders, average order
   - revenue by day: inline SVG bar chart, every Singapore day of the period (hover a bar for its numbers)
   - revenue by concert: bars per concert with gross and tickets, cancelled concerts tagged
@@ -34,8 +35,9 @@ All routes need the `organisers` group (`RequireAuth`). Locally (fake login): si
 
 ## API endpoints used
 
-`GET/POST /concerts`, `GET /concerts/:id`, `PUT /concerts/:id/ticket-types`, `PUT /concerts/:id/layout`,
-`POST /concerts/:id/publish`, `POST /concerts/:id/cancel`, `GET /concerts/:id/dashboard`, `GET /reports/sales`.
+Under `/api/organiser`: `GET/POST /concerts`, `GET /concerts/:id`, `PUT /concerts/:id/ticket-types`,
+`PUT /concerts/:id/layout`, `POST /concerts/:id/publish`, `POST /concerts/:id/cancel`, `GET /concerts/:id/dashboard`.
+Under `/api/reports`: `GET /sales` (the reports page also calls `GET /api/organiser/concerts` for its concert select).
 Response shapes are in `types.ts`; API errors (validation, layout/quantity mismatches) are shown by `ErrorNotice`.
 
 ## Notes

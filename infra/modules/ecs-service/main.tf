@@ -34,8 +34,15 @@ locals {
       autoscaling_max   = coalesce(s.autoscaling_max, var.autoscaling_max_capacity)
       cpu               = coalesce(s.cpu, var.task_cpu)
       memory            = coalesce(s.memory, var.task_memory)
+      db_secret_arn     = coalesce(s.db_secret_arn, var.db_secret_arn)
+      # Not coalesce(): an explicit false must win over a true default.
+      run_migrations_on_start = s.run_migrations_on_start != null ? s.run_migrations_on_start : var.run_migrations_on_start
+      extra_environment       = s.extra_environment
     }
   }
+
+  # Every DB secret some service reads (the execution role's GetSecretValue grant, iam.tf).
+  db_secret_arns = distinct([for s in values(local.services) : s.db_secret_arn])
 
   # Everything except the default service gets a path-based listener rule.
   routed_services = { for k, s in local.services : k => s if k != var.default_service }
@@ -60,9 +67,6 @@ locals {
       # The API refuses NODE_ENV=production + dev-header unless this is true;
       # derived so it turns off automatically when auth_mode = "cognito".
       ALLOW_DEV_AUTH = var.auth_mode == "dev-header" ? "true" : "false"
-      # Migrations take a pg advisory lock, so concurrent tasks (of any service) don't race;
-      # whichever starts first applies them, the others find nothing left to do.
-      RUN_MIGRATIONS_ON_START = tostring(var.run_migrations_on_start)
     },
     var.extra_environment,
   )
@@ -79,12 +83,6 @@ locals {
           hostPort      = var.container_port
           protocol      = "tcp"
         }
-      ]
-
-      # Resolved by the execution role at task start from the RDS-managed secret JSON.
-      secrets = [
-        { name = "DB_USER", valueFrom = "${var.db_secret_arn}:username::" },
-        { name = "DB_PASSWORD", valueFrom = "${var.db_secret_arn}:password::" },
       ]
     },
     # Only emit healthCheck when enabled; a null key causes perpetual diffs.
@@ -103,9 +101,26 @@ locals {
 
   container_definitions = {
     for k, s in local.services : k => merge(local.container_base, {
-      # API_MODULES last, so extra_environment can't change which routes a service mounts.
+      # Service extra_environment over the module-wide one; API_MODULES last, so neither can change which routes a
+      # service mounts.
       environment = [
-        for name, value in merge(local.environment, { API_MODULES = join(",", s.modules) }) : { name = name, value = value }
+        for name, value in merge(
+          {
+            # Migrations take a pg advisory lock, so concurrent tasks (of any service) don't race;
+            # whichever starts first applies them, the others find nothing left to do.
+            RUN_MIGRATIONS_ON_START = tostring(s.run_migrations_on_start)
+          },
+          local.environment,
+          s.extra_environment,
+          { API_MODULES = join(",", s.modules) },
+        ) : { name = name, value = value }
+      ]
+
+      # Resolved by the execution role at task start from the secret JSON (keys username/password): the
+      # RDS-managed master secret unless the service sets its own db_secret_arn.
+      secrets = [
+        { name = "DB_USER", valueFrom = "${s.db_secret_arn}:username::" },
+        { name = "DB_PASSWORD", valueFrom = "${s.db_secret_arn}:password::" },
       ]
 
       logConfiguration = {

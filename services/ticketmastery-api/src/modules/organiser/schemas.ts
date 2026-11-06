@@ -110,10 +110,3 @@ export const replaceLayoutBody = z
 export type ReplaceLayoutInput = z.infer<typeof replaceLayoutBody>;
 
 export const cancelConcertBody = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
-
-/** GET /reports/sales?days=7|30|90|all&concertId=<uuid>. `all` = since the first sale. */
-export const salesReportQuery = z.object({
-  days: z.enum(['7', '30', '90', 'all']).default('30'),
-  concertId: z.uuid().optional(),
-});
-export type SalesReportQuery = z.infer<typeof salesReportQuery>;

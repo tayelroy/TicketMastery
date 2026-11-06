@@ -27,6 +27,9 @@ locals {
     "ANY /api/checkout/{proxy+}",
     "ANY /api/organiser",
     "ANY /api/organiser/{proxy+}",
+    # UC5 sales reports (reporting service): read-only, so GET only.
+    "GET /api/reports",
+    "GET /api/reports/{proxy+}",
   ], var.waiting_room_public ? [] : local.waiting_room_routes, var.extra_protected_routes))
 }
 

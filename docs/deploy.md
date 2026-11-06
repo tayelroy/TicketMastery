@@ -71,9 +71,32 @@ The ECS service needs an image that doesn't exist yet. Create the repository fir
 
    RDS takes about 5–10 minutes to create. `tfplan` is gitignored. Delete it after applying, because it can contain sensitive values.
 
+5. **Give the reporting service its database login:** `loadtest/scripts/reporting-user.sh` (see [below](#reporting-service-database-login)). Until then the `reporting` service's tasks can't start (its secret has no value yet), so `/api/reports` answers 503 and its no-healthy-hosts alarm fires; the script ends by forcing a new deployment of that service.
+
 ### Migrations
 
-When `RUN_MIGRATIONS_ON_START=true`, the API applies pending SQL migrations from `services/ticketmastery-api/migrations/` at container start. The run holds a Postgres advisory lock, so several tasks starting together are safe: all five ECS services (one per use case) run the same image with migrations on, the first task to start applies them, and the others wait for the lock and then find nothing to do. A failing migration stops the task, and the ECS deployment circuit breaker rolls back that service. The app's own default is `false`; the ECS task definitions set it to `true` via the Terraform variable `run_migrations_on_start` (default `true`). Check the API logs for the migration lines after the first deploy.
+When `RUN_MIGRATIONS_ON_START=true`, the API applies pending SQL migrations from `services/ticketmastery-api/migrations/` at container start. The run holds a Postgres advisory lock, so several tasks starting together are safe: five of the six ECS services (one per use case) run the same image with migrations on, the first task to start applies them, and the others wait for the lock and then find nothing to do. `reporting` has them off (`run_migrations_on_start = false` in its `ecs_services` entry): it logs in as the read-only `reporting_ro` role, which can't create tables. A failing migration stops the task, and the ECS deployment circuit breaker rolls back that service. The app's own default is `false`; the ECS task definitions set it to `true` via the Terraform variable `run_migrations_on_start` (default `true`). Check the API logs for the migration lines after the first deploy.
+
+### Reporting service database login
+
+The `reporting` service (`/api/reports`, organiser sales reports) connects to RDS as `reporting_ro` (migration `0004`: `SELECT` on the five `report_*` views only, read-only sessions, at most 10 connections), not as the master user. Its `DB_USER`/`DB_PASSWORD` come from the Secrets Manager secret `ticketmastery-dev/reporting/reporting-ro` (output `reporting_db_secret_arn`). Terraform creates that secret **without a value**, so no password is in code or Terraform state; `loadtest/scripts/reporting-user.sh` generates the password, sets it on the role through ECS Exec in an organiser task (only a SCRAM verifier crosses ECS Exec), writes `{"username","password"}` to the secret, and forces a new deployment of `reporting` if it exists. ECS reads the secret only when a task starts, so a task started before the secret has a value fails to start.
+
+**Adding it to a running stack** (the API image and migration `0004` are already deployed, an organiser task is running): create the empty secret, fill it, then apply the rest, so the reporting tasks find a value on their first start:
+
+```bash
+cd infra/envs/dev
+terraform apply -target=module.rds.aws_secretsmanager_secret.reporting_ro   # only the secret
+../../../loadtest/scripts/reporting-user.sh                                 # role password -> secret
+# build and push the image with the reporting module, set image_tag (see "Deploying a new image"), then:
+terraform plan -out tfplan && terraform apply tfplan                       # reporting service, routes, alarms
+curl -s -o /dev/null -w '%{http_code}\n' "$(terraform output -raw api_endpoint)/api/reports/sales"   # 401 without a token, not 404/503
+```
+
+Then deploy the frontend (its reports page now calls `/api/reports/sales`; the old `/api/organiser/reports/sales` is gone with the new image, so an old frontend gets 404 there until then).
+
+**First deploy of an empty stack:** the script needs a running organiser task, which only exists after the full apply, so run it as step 5 above; `reporting` is down from the apply until the script's forced deployment.
+
+**Rotate** the password any time by re-running the script: it changes the role first, then the secret, then replaces the reporting tasks (until they are replaced, their open connections keep working but new ones fail). `reporting-user.sh disable` sets the role back to `NOLOGIN` (kill switch); the reporting service then fails its health check until the script is run again.
 
 ## Verify
 
@@ -108,7 +131,7 @@ aws secretsmanager get-secret-value \
   --query SecretString --output text
 ```
 
-Print it only when you need it. Never paste it into chat, code, `.env` files, or tickets. The database is in private subnets and **can't be reached from your laptop**. Debug through the API, or with ECS Exec into a running API task (on by default, `enable_execute_command = true`; needs the Session Manager plugin). Any service's task has the DB settings; this uses `discovery`:
+Print it only when you need it. Never paste it into chat, code, `.env` files, or tickets. The database is in private subnets and **can't be reached from your laptop**. Debug through the API, or with ECS Exec into a running API task (on by default, `enable_execute_command = true`; needs the Session Manager plugin). Every service's task except `reporting` (which has the read-only `reporting_ro` login) has the master DB settings; this uses `discovery`:
 
 ```bash
 TASK=$(aws ecs list-tasks --cluster "$(terraform output -raw ecs_cluster_name)" \
@@ -117,11 +140,11 @@ aws ecs execute-command --cluster "$(terraform output -raw ecs_cluster_name)" --
   --container ticketmastery-api --interactive --command "sh"
 ```
 
-`loadtest/scripts/nfr3-oversell-check.sh` uses this to run its SQL check inside the VPC.
+`loadtest/scripts/nfr3-oversell-check.sh` uses this to run its SQL check inside the VPC, and `loadtest/scripts/reporting-user.sh` to set the `reporting_ro` password.
 
 ## Deploying a new image
 
-There is one image for all five ECS services (discovery, account, waiting-room, checkout, organiser); each service runs it with its own `API_MODULES`.
+There is one image for all six ECS services (discovery, account, waiting-room, checkout, organiser, reporting); each service runs it with its own `API_MODULES`.
 
 1. Build and push a new tag (step 2 above).
 2. Either set `image_tag` to the new tag and run `terraform plan -out tfplan && terraform apply tfplan` (every service gets a new task definition revision and rolls on its own, each with its own circuit breaker), or re-push `latest` and force a redeploy of every service:
@@ -214,7 +237,7 @@ Dev defaults make this clean:
 
 - RDS: `db_skip_final_snapshot = true` and `db_deletion_protection = false`. **All data is lost.** Set `db_skip_final_snapshot = false` first if you want a final snapshot.
 - ECR: `ecr_force_delete = true`, so images are deleted with the repository.
-- The RDS-managed master secret is deleted together with the instance.
+- The RDS-managed master secret is deleted together with the instance. The `reporting/reporting-ro` secret has no recovery window (`recovery_window_in_days = 0`), so it is deleted at once and a new stack can reuse the name; run `loadtest/scripts/reporting-user.sh` again after re-creating the stack.
 
 Afterwards, check the console in `ap-southeast-1` for leftovers that keep billing:
 

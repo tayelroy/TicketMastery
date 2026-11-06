@@ -46,7 +46,7 @@ export function OrganiserReportsPage() {
     setState({ kind: 'loading' });
     const query = new URLSearchParams({ days });
     if (concertId) query.set('concertId', concertId);
-    api<SalesReport>(`/api/organiser/reports/sales?${query}`)
+    api<SalesReport>(`/api/reports/sales?${query}`)
       .then((report) => !cancelled && setState({ kind: 'ready', report }))
       .catch((error) => !cancelled && setState({ kind: 'error', error }));
     return () => {

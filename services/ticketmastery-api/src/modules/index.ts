@@ -4,6 +4,7 @@ import { checkoutRouter } from './checkout/router';
 import { discoveryRouter } from './discovery/router';
 import type { ModuleKey } from './keys';
 import { organiserRouter } from './organiser/router';
+import { reportingRouter } from './reporting/router';
 import { waitingRoomRouter } from './waiting-room/router';
 
 export interface ModuleRegistration {
@@ -26,4 +27,5 @@ export const modules: ModuleRegistration[] = [
   { key: 'waiting-room', basePath: '/waiting-room', router: waitingRoomRouter, useCase: 'UC3', owner: 'Yan Ting' },
   { key: 'checkout', basePath: '/checkout', router: checkoutRouter, useCase: 'UC4', owner: 'Shi Hui' },
   { key: 'organiser', basePath: '/organiser', router: organiserRouter, useCase: 'UC5', owner: 'Elroy' },
+  { key: 'reporting', basePath: '/reports', router: reportingRouter, useCase: 'UC5', owner: 'Elroy' },
 ];

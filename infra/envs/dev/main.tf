@@ -1,5 +1,16 @@
 locals {
   name = "${var.project}-${var.environment}"
+
+  # ecs_services[*].db_user -> the secret the service's DB_USER/DB_PASSWORD come from. Done here because a variable
+  # default cannot reference a resource ARN. The ecs-service module's services type has no db_user attribute, so
+  # Terraform drops it when converting.
+  db_secret_arns = {
+    master       = module.rds.master_user_secret_arn
+    reporting_ro = module.rds.reporting_ro_secret_arn
+  }
+  ecs_services = {
+    for k, s in var.ecs_services : k => merge(s, { db_secret_arn = local.db_secret_arns[s.db_user] })
+  }
 }
 
 # Implementation vs target (HA) design: see docs/architecture.md.
@@ -61,7 +72,8 @@ module "rds" {
 }
 
 # One ECS service per use case (var.ecs_services), all from the same image, behind one ALB: discovery is the
-# listener default, the others get path rules. One shared task role and execution role.
+# listener default, the others get path rules. One shared task role and execution role. Every service logs in to RDS
+# as the master user except reporting (reporting_ro, read-only, see ecs_services).
 module "ecs_service" {
   source = "../../modules/ecs-service"
 
@@ -89,7 +101,7 @@ module "ecs_service" {
   db_name       = module.rds.db_name
   db_secret_arn = module.rds.master_user_secret_arn
 
-  services               = var.ecs_services
+  services               = local.ecs_services
   desired_count          = var.desired_count
   container_insights     = var.container_insights
   enable_execute_command = var.enable_execute_command

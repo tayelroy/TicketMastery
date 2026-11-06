@@ -26,10 +26,10 @@ Every alarm sends its `ALARM` and `OK` transitions to the `<name>-alerts` topic.
 *N × 1 min* means N consecutive one-minute datapoints must all breach.
 
 The API runs as one ECS service per use case (`ecs_services`: discovery, account, waiting-room, checkout,
-organiser), each with its own target group. Only the two alarms that say *which* use case is in trouble exist per
-service, named `<name>-<service key>-<alarm>` (e.g. `ticketmastery-dev-checkout-alb-no-healthy-hosts`): service down,
-and scaling ceiling. CPU and memory are one alarm each on the busiest service (metric math `MAX` over the five), and
-the dashboard shows one line per service to find it. A task that fails health checks while another still serves
+organiser, reporting), each with its own target group. Only the two alarms that say *which* use case is in trouble
+exist per service, named `<name>-<service key>-<alarm>` (e.g. `ticketmastery-dev-checkout-alb-no-healthy-hosts`):
+service down, and scaling ceiling. CPU and memory are one alarm each on the busiest service (metric math `MAX` over the
+six), and the dashboard shows one line per service to find it. A task that fails health checks while another still serves
 shows up in the 5xx alarms. API latency and 5xx stay ALB-wide: NFR-1 and the error budget are for the API as a whole.
 
 | Signal | Metric | Alarm when | Period | Why |
@@ -52,10 +52,11 @@ shows up in the 5xx alarms. API latency and 5xx stay ALB-wide: NFR-1 and the err
 | Waiting-room size | `TicketMastery` `WaitingRoomSize` max (custom, no dimensions) | > 20 000 | 1 min | Proposal threshold: notify, and admins decide whether to raise the admit rate or the API scaling maximum. queue-manager writes it every scheduled run as CloudWatch Embedded Metric Format (it has no NAT, so it can't call `PutMetricData`). No data outside a sale = OK. |
 | Checkout failures | `TicketMastery` `CheckoutPaymentFailures` / `CheckoutPaymentAttempts` × 100 (log metric filters) | > 20 % with ≥ 5 attempts | 5 min | Proposal threshold: one in five payments failing means the payment provider is likely down. The 5-attempt floor stops a single declined card on a quiet day from alerting. |
 
-With the 5 dev services: 15 shared alarms + 2 busiest-service alarms + 1 per service × 5 = 22 in implementation mode,
-27 with autoscaling on (+1 scaling-ceiling alarm per service), plus the ticket-dlq alarm in `modules/messaging`.
-Before the per-service split it was 19 (20); the first version of the split had one alarm of each kind per service
-(40 with autoscaling), trimmed because per-service CPU, memory and unhealthy-host copies added noise, not signal.
+With the 6 dev services: 15 shared alarms + 2 busiest-service alarms + 1 per service × 6 = 23 in implementation mode,
+29 with autoscaling on (+1 scaling-ceiling alarm per service), plus the ticket-dlq alarm in `modules/messaging` (24 and
+30). Per-service alarms and dashboard lines follow `ecs_services`, so a new service (as `reporting` was) needs no change
+here. Before the per-service split it was 19 (20); the first version of the split had one alarm of each kind per
+service (40 with autoscaling), trimmed because per-service CPU, memory and unhealthy-host copies added noise, not signal.
 
 ### Proposal rows not carried over
 
@@ -90,9 +91,10 @@ RDS for PostgreSQL defaults `max_connections` to `LEAST({DBInstanceClassMemory/9
 memory because RDS reserves some for the OS and its own processes, so the real value is lower. The module therefore
 uses `rds_max_connections = 80` (a conservative estimate) and alarms above `floor(0.8 × 80) = 64`. Check the real
 value with `SHOW max_connections;` and set `rds_max_connections` to it. For scale: each API task opens at most
-`DB_POOL_MAX = 10` connections, so the 5 services at one task each can use 50, and at their dev autoscaling maximums
-(3 + 2 + 3 + 3 + 2 = 13 tasks) up to 130, above the estimated 80. The pools open connections on demand, so idle
-services hold few, but before relying on autoscaling check `SHOW max_connections;` or lower `DB_POOL_MAX`.
+`DB_POOL_MAX = 10` connections (reporting: 4, and its `reporting_ro` role is capped at 10 connections), so the 6
+services at one task each can use 54, and at their dev autoscaling maximums (3 + 2 + 3 + 3 + 2 tasks at 10, plus 2
+reporting tasks at 4) up to 138, above the estimated 80. The pools open connections on demand, so idle services hold
+few, but before relying on autoscaling check `SHOW max_connections;` or lower `DB_POOL_MAX`.
 
 ## Dashboard
 
@@ -103,7 +105,7 @@ unhealthy targets, live tasks vs each service's autoscaling maximum, ECS CPU, EC
 credits); RDS connections; RDS free storage; API Gateway requests and 5xx rate; API Gateway p95 latency and integration
 latency; ticket-queue age and depth; e-ticket delivery latency (`TicketMastery/ETicketDeliveryLatency`, written by
 ticket-fn); both DLQs; Lambda errors, throttles and invocations; waiting-room size; checkout payment failures. That is
-57 metrics (30 of them the per-service lines). Before the split it was 16 graphs.
+63 metrics (36 of them the per-service lines, 6 graphs × 6 services). Before the split it was 16 graphs.
 
 ## AWS Budgets
 
@@ -172,7 +174,7 @@ All in ap-southeast-1, list prices, before the free tier:
 
 | Item | Monthly |
 |---|---|
-| Alarms: 32 single-metric alarms (37 with autoscaling) + 3 metric-math alarms of 2 metrics each = 38 (43) alarm metrics × USD 0.10 | ~USD 3.80 (4.30) (10 alarm metrics free) |
+| Alarms: 18 single-metric alarms (24 with autoscaling) + 3 metric-math alarms of 2 metrics each + 2 busiest-service alarms of 6 metrics each = 36 (42) alarm metrics × USD 0.10 | ~USD 3.60 (4.20) (10 alarm metrics free) |
 | Custom metrics: `WaitingRoomSize`, `ETicketDeliveryLatency`, `CheckoutPaymentAttempts`, `CheckoutPaymentFailures` × USD 0.30 | ~USD 1.20 (10 free) |
-| Dashboard | USD 3: 57 metrics is above the 50-metric limit of the free tier's 3 dashboards |
+| Dashboard | USD 3: 63 metrics is above the 50-metric limit of the free tier's 3 dashboards |
 | SNS email, AWS Budgets (no budget actions) | free at this volume |

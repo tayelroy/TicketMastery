@@ -137,17 +137,24 @@ variable "ecs_services" {
     need path_patterns and a fixed listener_priority (> 20). Unset desired_count / autoscaling_min / cpu / memory /
     autoscaling_max fall back to desired_count, autoscaling_min_capacity, task_cpu, task_memory,
     autoscaling_max_capacity; values set here win over those. See infra/README.md.
+    db_user picks the database login: "master" (the RDS-managed master secret, default) or "reporting_ro" (the
+    read-only reporting role's secret, module.rds); main.tf turns it into the service's db_secret_arn, because a
+    variable default cannot reference a resource ARN. run_migrations_on_start and extra_environment override the
+    globals of the same name per service (extra_environment is merged over the global one).
   EOT
   type = map(object({
-    modules           = list(string)
-    path_patterns     = optional(list(string), [])
-    listener_priority = optional(number)
-    tg_short_name     = optional(string)
-    desired_count     = optional(number)
-    autoscaling_min   = optional(number)
-    autoscaling_max   = optional(number)
-    cpu               = optional(number)
-    memory            = optional(number)
+    modules                 = list(string)
+    path_patterns           = optional(list(string), [])
+    listener_priority       = optional(number)
+    tg_short_name           = optional(string)
+    desired_count           = optional(number)
+    autoscaling_min         = optional(number)
+    autoscaling_max         = optional(number)
+    cpu                     = optional(number)
+    memory                  = optional(number)
+    db_user                 = optional(string, "master")
+    run_migrations_on_start = optional(bool)
+    extra_environment       = optional(map(string), {})
   }))
   default = {
     # UC1 browse + seat map: the read-heavy path, first to need more tasks at an on-sale.
@@ -177,13 +184,32 @@ variable "ecs_services" {
       listener_priority = 130
       autoscaling_max   = 3
     }
-    # UC5 organiser concert management and reports.
+    # UC5 organiser concert management.
     organiser = {
       modules           = ["organiser"]
       path_patterns     = ["/api/organiser", "/api/organiser/*"]
       listener_priority = 140
       autoscaling_max   = 2
     }
+    # UC5 sales reports, live from the report_* views, as the read-only reporting_ro role: it can SELECT those five
+    # views and nothing else, so it cannot run migrations. Its connection limit is 10: 2 tasks x DB_POOL_MAX 4 = 8,
+    # leaving 2 for reporting-user.sh checks or psql. (During a deployment old and new tasks overlap, but a pool only
+    # opens connections that concurrent requests need and closes idle ones after 30s; over the limit a request
+    # fails, the task does not.)
+    reporting = {
+      modules                 = ["reporting"]
+      path_patterns           = ["/api/reports", "/api/reports/*"]
+      listener_priority       = 150
+      autoscaling_max         = 2
+      db_user                 = "reporting_ro"
+      run_migrations_on_start = false
+      extra_environment       = { DB_POOL_MAX = "4" }
+    }
+  }
+
+  validation {
+    condition     = alltrue([for s in values(var.ecs_services) : contains(["master", "reporting_ro"], s.db_user)])
+    error_message = "ecs_services[*].db_user must be \"master\" or \"reporting_ro\"."
   }
 }
 
@@ -194,7 +220,7 @@ variable "desired_count" {
 }
 
 variable "run_migrations_on_start" {
-  description = "Run the API's SQL migrations when each task starts (every service; advisory-locked, so only one task applies them)."
+  description = "Run the API's SQL migrations when each task starts (every service whose ecs_services entry doesn't override it; advisory-locked, so only one task applies them)."
   type        = bool
   default     = true
 }
@@ -242,7 +268,7 @@ variable "autoscaling_min_capacity" {
 }
 
 variable "autoscaling_max_capacity" {
-  description = "Default maximum task count when autoscaling, for services whose ecs_services entry sets no autoscaling_max (the dev defaults set it for all five)."
+  description = "Default maximum task count when autoscaling, for services whose ecs_services entry sets no autoscaling_max (the dev defaults set it for all six)."
   type        = number
   default     = 2
 }

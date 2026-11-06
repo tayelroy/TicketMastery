@@ -17,6 +17,7 @@ const probes: Record<ModuleKey, { method: string; path: string }> = {
   'waiting-room': { method: 'POST', path: '/api/waiting-room/not-a-uuid/join' },
   checkout: { method: 'POST', path: '/api/checkout/holds' },
   organiser: { method: 'GET', path: '/api/organiser/concerts' },
+  reporting: { method: 'GET', path: '/api/reports/sales' },
 };
 
 describe('createApp with API_MODULES', () => {
@@ -74,7 +75,7 @@ describe('createApp with API_MODULES', () => {
   });
 
   test('a subset mounts only those modules; the others answer not_found 404', async () => {
-    for (const selected of [['checkout'], ['discovery', 'organiser']] as ModuleKey[][]) {
+    for (const selected of [['checkout'], ['discovery', 'organiser'], ['reporting']] as ModuleKey[][]) {
       await withApp(selected, async (baseUrl) => {
         for (const key of Object.keys(probes) as ModuleKey[]) {
           const res = await probe(baseUrl, key);

@@ -117,7 +117,14 @@ describe('server start-up', () => {
 
   test('API_MODULES: the listening line names the mounted modules (all when unset)', async () => {
     const all = await startServer({ TM_TEST_JWKS: 'unreachable' });
-    assert.deepEqual(all.logs[0]!.modules, ['discovery', 'account', 'waiting-room', 'checkout', 'organiser']);
+    assert.deepEqual(all.logs[0]!.modules, [
+      'discovery',
+      'account',
+      'waiting-room',
+      'checkout',
+      'organiser',
+      'reporting',
+    ]);
     const checkout = await startServer({ API_MODULES: 'checkout', TM_TEST_JWKS: 'unreachable' });
     assert.deepEqual(messages(checkout), ['ticketmastery-api listening', 'shutting down']);
     assert.deepEqual(checkout.logs[0]!.modules, ['checkout']);

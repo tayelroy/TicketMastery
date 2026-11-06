@@ -37,3 +37,8 @@ output "availability_zone" {
   description = "AZ of the DB instance (the primary, when Multi-AZ)."
   value       = aws_db_instance.this.availability_zone
 }
+
+output "reporting_ro_secret_arn" {
+  description = "ARN of the Secrets Manager secret for database role reporting_ro (JSON keys `username` and `password`, written by loadtest/scripts/reporting-user.sh; Terraform creates it empty)."
+  value       = aws_secretsmanager_secret.reporting_ro.arn
+}

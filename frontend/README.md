@@ -51,7 +51,7 @@ Each use case has one folder under `src/pages/`:
 | `account/` | UC2 My Tickets & Account | `/api/me` | Andrew |
 | `waiting-room/` | UC3 Virtual waiting room | `/api/waiting-room` | Yan Ting |
 | `checkout/` | UC4 Seat selection & checkout | `/api/checkout` | Shi Hui |
-| `organiser/` | UC5 Concert & ticket management | `/api/organiser` | Elroy |
+| `organiser/` | UC5 Concert & ticket management, sales reports | `/api/organiser`, `/api/reports` | Elroy |
 
 Each folder has a `routes.tsx` (its URLs and nav links), its `*Page.tsx` files, optional CSS, and a `README.md` listing its endpoints.
 

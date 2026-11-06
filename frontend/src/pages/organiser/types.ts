@@ -67,8 +67,8 @@ export interface Dashboard {
 export type ReportDays = '7' | '30' | '90' | 'all';
 
 /**
- * GET /api/organiser/reports/sales. Money is integer cents in `currency`; amounts are never added across
- * currencies. Dates are Singapore calendar days (YYYY-MM-DD).
+ * GET /api/reports/sales (reporting module, its own ECS service). Money is integer cents in `currency`; amounts are
+ * never added across currencies. Dates are Singapore calendar days (YYYY-MM-DD).
  */
 export interface SalesReport {
   /** `from: null` = all time (since the first sale); `to` is today in Singapore. */

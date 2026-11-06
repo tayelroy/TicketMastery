@@ -36,7 +36,7 @@ cpu_architecture              = "X86_64" # ARM64 if you push arm64 images
 tasks_in_public_subnets       = true     # task gets a public IP for egress (no NAT); inbound still only from the ALB SG
 tasks_single_az               = true     # tasks only in AZ a
 desired_count                 = 1
-run_migrations_on_start       = true
+run_migrations_on_start       = true # every service except reporting (its ecs_services entry turns them off)
 auth_mode                     = "dev-header" # MUST be "cognito" once the Cognito authorizer is live
 enable_container_health_check = false
 container_insights            = "disabled"
@@ -45,6 +45,9 @@ enable_autoscaling            = false # configurable; off for the implementation
 autoscaling_min_capacity      = 1
 autoscaling_max_capacity      = 2
 ecr_force_delete              = true
+# ecs_services is not set here: its default (variables.tf) is the six services, including reporting, which logs in
+# as the read-only reporting_ro role (db_user = "reporting_ro", secret filled by loadtest/scripts/reporting-user.sh,
+# see docs/deploy.md). Setting it replaces the whole map, so copy the default and edit that.
 
 # RDS (single-AZ; pinned to AZ a automatically while db_multi_az = false)
 db_engine_version          = "16"

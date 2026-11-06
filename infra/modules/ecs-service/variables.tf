@@ -102,13 +102,13 @@ variable "auth_mode" {
 }
 
 variable "run_migrations_on_start" {
-  description = "Run SQL migrations (advisory-locked, safe with several tasks) when the container starts."
+  description = "Run SQL migrations (advisory-locked, safe with several tasks) when the container starts. Default for every service; services[*].run_migrations_on_start overrides it."
   type        = bool
   default     = true
 }
 
 variable "extra_environment" {
-  description = "Additional plain environment variables for the container (e.g. SQS queue URLs, SNS topic ARNs from teammates' modules). Never put secrets here."
+  description = "Additional plain environment variables for every service's container (e.g. SQS queue URLs, SNS topic ARNs from teammates' modules); services[*].extra_environment is merged over it. Never put secrets here."
   type        = map(string)
   default     = {}
 }
@@ -140,7 +140,7 @@ variable "db_name" {
 }
 
 variable "db_secret_arn" {
-  description = "ARN of the RDS-managed master user secret (JSON keys username/password)."
+  description = "ARN of the RDS-managed master user secret (JSON keys username/password). Default DB login of every service; services[*].db_secret_arn overrides it."
   type        = string
 }
 
@@ -162,17 +162,27 @@ variable "services" {
       desired_count, autoscaling_min, autoscaling_max, cpu, memory
                         Per-service overrides. Unset = desired_count, autoscaling_min_capacity,
                         autoscaling_max_capacity, task_cpu, task_memory.
+      db_secret_arn     Secrets Manager secret (JSON keys username/password) for DB_USER/DB_PASSWORD. Unset =
+                        db_secret_arn (the master user). The execution role may read every distinct secret used.
+      run_migrations_on_start
+                        Per-service override of run_migrations_on_start; false for a service whose DB user cannot
+                        create tables.
+      extra_environment Plain environment variables merged over the module-wide extra_environment (e.g.
+                        DB_POOL_MAX). API_MODULES cannot be overridden. Never put secrets here.
   EOT
   type = map(object({
-    modules           = list(string)
-    path_patterns     = optional(list(string), [])
-    listener_priority = optional(number)
-    tg_short_name     = optional(string)
-    desired_count     = optional(number)
-    autoscaling_min   = optional(number)
-    autoscaling_max   = optional(number)
-    cpu               = optional(number)
-    memory            = optional(number)
+    modules                 = list(string)
+    path_patterns           = optional(list(string), [])
+    listener_priority       = optional(number)
+    tg_short_name           = optional(string)
+    desired_count           = optional(number)
+    autoscaling_min         = optional(number)
+    autoscaling_max         = optional(number)
+    cpu                     = optional(number)
+    memory                  = optional(number)
+    db_secret_arn           = optional(string)
+    run_migrations_on_start = optional(bool)
+    extra_environment       = optional(map(string), {})
   }))
 
   validation {
@@ -182,8 +192,8 @@ variable "services" {
 
   # Same list as services/ticketmastery-api/src/modules/keys.ts: a typo fails the plan instead of crash-looping tasks.
   validation {
-    condition     = alltrue(flatten([for s in values(var.services) : [for m in s.modules : contains(["discovery", "account", "waiting-room", "checkout", "organiser"], m)]]))
-    error_message = "services[*].modules must be API module keys: discovery, account, waiting-room, checkout, organiser."
+    condition     = alltrue(flatten([for s in values(var.services) : [for m in s.modules : contains(["discovery", "account", "waiting-room", "checkout", "organiser", "reporting"], m)]]))
+    error_message = "services[*].modules must be API module keys: discovery, account, waiting-room, checkout, organiser, reporting."
   }
 
   validation {

@@ -16,7 +16,7 @@ const COGNITO_MESSAGE =
   'AUTH_MODE=cognito needs COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID ' +
   '(in AWS they come from module.auth_apigw outputs via extra_environment).';
 /** Spelled out rather than imported from modules/keys.ts, so a change to the key list shows up here. */
-const ALL_MODULES = ['discovery', 'account', 'waiting-room', 'checkout', 'organiser'];
+const ALL_MODULES = ['discovery', 'account', 'waiting-room', 'checkout', 'organiser', 'reporting'];
 
 describe('config', () => {
   let envSchema: typeof ConfigModule.envSchema;
@@ -140,7 +140,7 @@ describe('config', () => {
     test('unknown keys are refused with the accepted list', () => {
       assert.deepEqual(issues({ ...base, API_MODULES: 'checkout,wroom,Discovery' }), [
         'API_MODULES: unknown module wroom, Discovery; expected a comma-separated subset of ' +
-          'discovery, account, waiting-room, checkout, organiser',
+          'discovery, account, waiting-room, checkout, organiser, reporting',
       ]);
     });
   });

@@ -1,7 +1,8 @@
 /**
- * UC5 GET /api/organiser/reports/sales against Postgres, through the real createApp() in AUTH_MODE=dev-header.
- * Orders are made by the real UC5 + UC4 services; confirmed_at is then moved back a number of days so the date
- * range is tested relative to today in Singapore. Skipped when DB_HOST is unset; runs in a throwaway schema.
+ * UC5 GET /api/reports/sales (the reporting module) against Postgres, through the real createApp() in
+ * AUTH_MODE=dev-header. Orders are made by the real UC5 + UC4 services; confirmed_at is then moved back a number of
+ * days so the date range is tested relative to today in Singapore. Skipped when DB_HOST is unset; runs in a throwaway
+ * schema. The reporting_ro test also needs a superuser connection, as in docker-compose, to SET ROLE.
  */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -11,6 +12,8 @@ import { after, before, describe, test } from 'node:test';
 import type * as PoolModule from '../src/db/pool';
 import type * as CheckoutServiceModule from '../src/modules/checkout/service';
 import type * as OrganiserServiceModule from '../src/modules/organiser/service';
+import type * as ReportingRepositoryModule from '../src/modules/reporting/repository';
+import type * as ReportingServiceModule from '../src/modules/reporting/service';
 
 const schema = `tm_test_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
 const ORGANISER = 'org-reports';
@@ -18,13 +21,14 @@ const OTHER_ORGANISER = 'org-reports-other';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The JSON body (timestamps are strings on the wire but no test reads them), or an API error. */
-type Report = Awaited<ReturnType<typeof OrganiserServiceModule.getSalesReport>> & { error: { code: string } };
+type Report = Awaited<ReturnType<typeof ReportingServiceModule.getSalesReport>> & { error: { code: string } };
 const SECTIONS = ['totals', 'byConcert', 'byDay', 'byTicketType', 'seatStatus', 'recentOrders'] as const;
 
 describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_HOST not set' }, () => {
   let db: typeof PoolModule;
   let organiser: typeof OrganiserServiceModule;
   let checkout: typeof CheckoutServiceModule;
+  let reporting: typeof ReportingRepositoryModule;
   let server: Server;
   let baseUrl: string;
 
@@ -89,6 +93,7 @@ describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : '
     await (await import('../src/db/migrate.js')).runMigrations();
     organiser = await import('../src/modules/organiser/service.js');
     checkout = await import('../src/modules/checkout/service.js');
+    reporting = await import('../src/modules/reporting/repository.js');
     const { createApp } = await import('../src/app.js');
     server = createApp().listen(0);
     await new Promise((resolve) => server.once('listening', resolve));
@@ -124,7 +129,7 @@ describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : '
   });
 
   test('last 7 days: only my confirmed orders in the range, not cached', async () => {
-    const res = await get('/api/organiser/reports/sales?days=7');
+    const res = await get('/api/reports/sales?days=7');
     assert.equal(res.status, 200);
     assert.equal(res.cacheControl, 'no-store');
     assert.deepEqual(res.body.range, { days: 7, from: sgtDay(-6), to: sgtDay(0) });
@@ -160,7 +165,7 @@ describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : '
   });
 
   test('by day: every Singapore day of the range, zero-filled', async () => {
-    const { body } = await get('/api/organiser/reports/sales?days=7');
+    const { body } = await get('/api/reports/sales?days=7');
     const gross: Record<number, number> = { 0: 20_800, [-1]: 5_400, [-3]: 10_400 };
     assert.deepEqual(
       body.byDay,
@@ -175,7 +180,7 @@ describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : '
   });
 
   test('wider ranges take older orders in; all time starts at the first sale', async () => {
-    const count = async (days: string) => (await get(`/api/organiser/reports/sales?days=${days}`)).body;
+    const count = async (days: string) => (await get(`/api/reports/sales?days=${days}`)).body;
     assert.equal((await count('30')).totals[0]?.confirmedOrders, 4);
     assert.equal((await count('90')).totals[0]?.confirmedOrders, 4);
     const all = await count('all');
@@ -185,12 +190,12 @@ describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : '
     assert.equal(all.byDay[0]?.date, sgtDay(-100));
     assert.equal(all.byDay[0]?.grossRevenueCents, 10_400);
     // Without days the range is 30 days.
-    assert.deepEqual((await get('/api/organiser/reports/sales')).body.range, (await count('30')).range);
+    assert.deepEqual((await get('/api/reports/sales')).body.range, (await count('30')).range);
   });
 
   test('totals equal the sum of byConcert per currency', async () => {
     for (const days of ['7', '30', '90', 'all']) {
-      const { body } = await get(`/api/organiser/reports/sales?days=${days}`);
+      const { body } = await get(`/api/reports/sales?days=${days}`);
       for (const t of body.totals) {
         const rows = body.byConcert.filter((c) => c.currency === t.currency);
         const keys = [
@@ -212,7 +217,7 @@ describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : '
   });
 
   test('ticket types are all time, seat status is now', async () => {
-    const { body } = await get('/api/organiser/reports/sales?days=7');
+    const { body } = await get('/api/reports/sales?days=7');
     assert.deepEqual(
       body.byTicketType
         .filter((t) => t.concertId === concert.a)
@@ -231,7 +236,7 @@ describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : '
   });
 
   test('concertId narrows every section to that concert', async () => {
-    const { status, body } = await get(`/api/organiser/reports/sales?days=30&concertId=${concert.b}`);
+    const { status, body } = await get(`/api/reports/sales?days=30&concertId=${concert.b}`);
     assert.equal(status, 200);
     assert.equal(body.concertId, concert.b);
     assert.equal(body.totals[0]?.grossRevenueCents, 5_400);
@@ -249,14 +254,14 @@ describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : '
   });
 
   test('someone else’s concert is 403, a missing one 404, like the other organiser routes', async () => {
-    const theirs = await get(`/api/organiser/reports/sales?concertId=${concert.other}`);
+    const theirs = await get(`/api/reports/sales?concertId=${concert.other}`);
     assert.equal(theirs.status, 403);
     assert.equal(theirs.body.error.code, 'forbidden');
-    const missing = await get(`/api/organiser/reports/sales?concertId=${randomUUID()}`);
+    const missing = await get(`/api/reports/sales?concertId=${randomUUID()}`);
     assert.equal(missing.status, 404);
     assert.equal(missing.body.error.code, 'not_found');
     // The other organiser sees only their own sale.
-    const other = await get('/api/organiser/reports/sales?days=7', OTHER_ORGANISER);
+    const other = await get('/api/reports/sales?days=7', OTHER_ORGANISER);
     assert.deepEqual(
       other.body.recentOrders.map((o) => o.orderId),
       [order.other],
@@ -264,7 +269,7 @@ describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : '
   });
 
   test('an organiser without sales gets empty sections', async () => {
-    const { status, body } = await get('/api/organiser/reports/sales?days=all', 'org-reports-nobody');
+    const { status, body } = await get('/api/reports/sales?days=all', 'org-reports-nobody');
     assert.equal(status, 200);
     for (const section of SECTIONS) {
       assert.deepEqual(body[section], [], section);
@@ -273,9 +278,48 @@ describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : '
 
   test('invalid days or concertId: 400 validation_error', async () => {
     for (const query of ['days=5', 'days=all&concertId=not-a-uuid']) {
-      const res = await get(`/api/organiser/reports/sales?${query}`);
+      const res = await get(`/api/reports/sales?${query}`);
       assert.equal(res.status, 400, query);
       assert.equal(res.body.error.code, 'validation_error', query);
+    }
+  });
+
+  test('every repository query runs as reporting_ro (SELECT on the report_* views only), with the same rows', async () => {
+    // The reporting ECS service logs in as reporting_ro (0004); here a superuser takes the role for one transaction.
+    // Each query is run once as the role and once as the migration owner: same rows, so no query needs a table.
+    const filters: ReportingRepositoryModule.ReportFilter[] = [
+      { organiserId: ORGANISER, concertId: null, from: sgtDay(-6), to: sgtDay(0) },
+      { organiserId: ORGANISER, concertId: concert.a, from: null, to: sgtDay(0) },
+    ];
+    const runAll = (q: PoolModule.Queryable) =>
+      Promise.all([
+        reporting.findConcertOrganiser(q, concert.a),
+        reporting.findConcertOrganiser(q, concert.other),
+        reporting.findConcertOrganiser(q, randomUUID()),
+        ...filters.flatMap((f) => [
+          reporting.reportTotals(q, f),
+          reporting.reportByConcert(q, f),
+          reporting.reportByDay(q, f),
+          reporting.reportByTicketType(q, f.organiserId, f.concertId),
+          reporting.reportSeatStatus(q, f.organiserId, f.concertId),
+          reporting.reportRecentOrders(q, f),
+        ]),
+      ]);
+    const asOwner = await runAll(db.pool);
+    const client = await db.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SET LOCAL ROLE reporting_ro');
+      // One client runs queries one at a time; Promise.all only queues them.
+      const asRole = await runAll(client);
+      assert.deepEqual(asRole, asOwner);
+      assert.deepEqual(asRole.slice(0, 3), [ORGANISER, OTHER_ORGANISER, undefined]);
+      assert.ok(asRole.slice(3).every((rows) => Array.isArray(rows) && rows.length > 0));
+      // The role really is that narrow (last: a refused query aborts the transaction).
+      await assert.rejects(client.query('SELECT 1 FROM concerts LIMIT 1'), { code: '42501' });
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
     }
   });
 });
