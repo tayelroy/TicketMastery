@@ -5,8 +5,9 @@ locals {
   alarm_actions = [aws_sns_topic.alerts.arn]
 
   alb_dimensions = { LoadBalancer = var.alb_arn_suffix }
-  tg_dimensions  = { LoadBalancer = var.alb_arn_suffix, TargetGroup = var.target_group_arn_suffix }
-  ecs_dimensions = { ClusterName = var.ecs_cluster_name, ServiceName = var.ecs_service_name }
+  # Per ECS service (one per use case): its target group and its ECS service.
+  tg_dimensions  = { for k, s in var.ecs_services : k => { LoadBalancer = var.alb_arn_suffix, TargetGroup = s.target_group_arn_suffix } }
+  ecs_dimensions = { for k, s in var.ecs_services : k => { ClusterName = var.ecs_cluster_name, ServiceName = s.service_name } }
   rds_dimensions = { DBInstanceIdentifier = var.rds_instance_id }
 
   rds_connections_threshold = floor(var.rds_max_connections * 0.8)
@@ -88,31 +89,20 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx_rate" {
   tags = var.tags
 }
 
-resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
-  alarm_name          = "${var.name}-alb-unhealthy-hosts"
-  alarm_description   = "At least one API task failed the ALB /health check for 2 minutes (usually the database is unreachable). Check the ECS service events and API logs."
-  namespace           = "AWS/ApplicationELB"
-  metric_name         = "UnHealthyHostCount"
-  dimensions          = local.tg_dimensions
-  statistic           = "Maximum"
-  period              = 60
-  evaluation_periods  = 2
-  comparison_operator = "GreaterThanThreshold"
-  threshold           = 0
-  treat_missing_data  = "notBreaching"
-  alarm_actions       = local.alarm_actions
-  ok_actions          = local.alarm_actions
-
-  tags = var.tags
-}
+# Per service only what says WHICH use case is in trouble: no healthy task (that part of the API is down) and, with
+# autoscaling, at max capacity (that service hit its ceiling). A failing-but-not-all-down task shows up in the
+# ALB/API Gateway 5xx alarms, and CPU/memory are watched across services below, so the alarm count stays small.
+# Latency and 5xx above stay ALB-wide: NFR-1 and the error budget are for the API as a whole.
 
 # The ALB reports HealthyHostCount every minute whether or not there is traffic, so missing data is itself a fault.
 resource "aws_cloudwatch_metric_alarm" "alb_no_healthy_hosts" {
-  alarm_name          = "${var.name}-alb-no-healthy-hosts"
-  alarm_description   = "No healthy API task behind the ALB for 2 minutes: the API is down. Check the ECS service events (failed deployments, stopped tasks)."
+  for_each = var.ecs_services
+
+  alarm_name          = "${var.name}-${each.key}-alb-no-healthy-hosts"
+  alarm_description   = "No healthy ${each.key} task behind the ALB for 2 minutes: that part of the API is down. Check the ECS service events of ${each.value.service_name} (failed deployments, stopped tasks)."
   namespace           = "AWS/ApplicationELB"
   metric_name         = "HealthyHostCount"
-  dimensions          = local.tg_dimensions
+  dimensions          = local.tg_dimensions[each.key]
   statistic           = "Minimum"
   period              = 60
   evaluation_periods  = 2
@@ -126,41 +116,51 @@ resource "aws_cloudwatch_metric_alarm" "alb_no_healthy_hosts" {
 }
 
 ################################################################################
-# ECS service (replaces the proposal's EC2/ASG rows)
+# ECS services (replace the proposal's EC2/ASG rows)
 ################################################################################
 
-resource "aws_cloudwatch_metric_alarm" "ecs_cpu_high" {
-  alarm_name          = "${var.name}-ecs-cpu-high"
-  alarm_description   = "API service average CPU above ${var.ecs_utilization_percent}% for 5 minutes. Raise the task count (or autoscaling max) or the task size."
-  namespace           = "AWS/ECS"
-  metric_name         = "CPUUtilization"
-  dimensions          = local.ecs_dimensions
-  statistic           = "Average"
-  period              = 60
-  evaluation_periods  = 5
-  comparison_operator = "GreaterThanThreshold"
-  threshold           = var.ecs_utilization_percent
-  treat_missing_data  = "notBreaching"
-  alarm_actions       = local.alarm_actions
-  ok_actions          = local.alarm_actions
-
-  tags = var.tags
+locals {
+  # Metric-math ids must start with a lower-case letter and contain no hyphens.
+  ecs_metric_ids = { for i, k in local.service_keys : k => "s${i}" }
 }
 
-resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
-  alarm_name          = "${var.name}-ecs-memory-high"
-  alarm_description   = "API service average memory above ${var.ecs_utilization_percent}% for 5 minutes; tasks risk being OOM-killed. Raise task_memory."
-  namespace           = "AWS/ECS"
-  metric_name         = "MemoryUtilization"
-  dimensions          = local.ecs_dimensions
-  statistic           = "Average"
-  period              = 60
+# One alarm each for CPU and memory: the highest average across all services. Autoscaling already reacts to CPU per
+# service and ecs-at-max-capacity names a service that can't scale further; the dashboard shows one line per service
+# to see which one is hot.
+resource "aws_cloudwatch_metric_alarm" "ecs_max_utilization" {
+  for_each = { cpu = "CPUUtilization", memory = "MemoryUtilization" }
+
+  alarm_name          = "${var.name}-ecs-max-${each.key}-high"
+  alarm_description   = "The busiest ECS service's average ${each.key} is above ${var.ecs_utilization_percent}% for 5 minutes. Find it on the dashboard (one line per service), then raise its autoscaling max or task size${each.key == "memory" ? "; tasks risk being OOM-killed" : ""}."
   evaluation_periods  = 5
   comparison_operator = "GreaterThanThreshold"
   threshold           = var.ecs_utilization_percent
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions
+
+  metric_query {
+    id          = "busiest"
+    expression  = "MAX([${join(", ", values(local.ecs_metric_ids))}])"
+    label       = "Busiest service ${each.key} %"
+    return_data = true
+  }
+
+  dynamic "metric_query" {
+    for_each = local.ecs_metric_ids
+
+    content {
+      id = metric_query.value
+
+      metric {
+        namespace   = "AWS/ECS"
+        metric_name = each.value
+        dimensions  = local.ecs_dimensions[metric_query.key]
+        stat        = "Average"
+        period      = 60
+      }
+    }
+  }
 
   tags = var.tags
 }
@@ -168,18 +168,18 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
 # LiveTaskCount is a free AWS/ECS service metric (no Container Insights needed, since Oct 2026). Only meaningful
 # with autoscaling: with a fixed desired count the service sits "at max" all the time.
 resource "aws_cloudwatch_metric_alarm" "ecs_at_max_capacity" {
-  count = var.autoscaling_enabled ? 1 : 0
+  for_each = var.autoscaling_enabled ? var.ecs_services : {}
 
-  alarm_name          = "${var.name}-ecs-at-max-capacity"
-  alarm_description   = "API service has run at its autoscaling maximum (${var.autoscaling_max_capacity} tasks) for 5 minutes: the scaling ceiling is reached. Decide whether to raise autoscaling_max_capacity."
+  alarm_name          = "${var.name}-${each.key}-ecs-at-max-capacity"
+  alarm_description   = "${each.value.service_name} has run at its autoscaling maximum (${each.value.autoscaling_max_capacity} tasks) for 5 minutes: the scaling ceiling is reached. Decide whether to raise its autoscaling_max."
   namespace           = "AWS/ECS"
   metric_name         = "LiveTaskCount"
-  dimensions          = local.ecs_dimensions
+  dimensions          = local.ecs_dimensions[each.key]
   statistic           = "Minimum"
   period              = 60
   evaluation_periods  = 5
   comparison_operator = "GreaterThanOrEqualToThreshold"
-  threshold           = var.autoscaling_max_capacity
+  threshold           = each.value.autoscaling_max_capacity
   treat_missing_data  = "notBreaching"
   alarm_actions       = local.alarm_actions
   ok_actions          = local.alarm_actions

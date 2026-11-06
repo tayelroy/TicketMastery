@@ -3,16 +3,19 @@
 Answers [instructor feedback e](architecture.md#instructor-feedback-and-how-we-addressed-it): organisers need
 internal reporting and sales statistics, for example in QuickSight.
 
-- **Built and tested:** the data layer. Five read-only SQL views in RDS
+- **Data layer:** five read-only SQL views in RDS
   ([`0003_uc5_reporting_views.sql`](../services/ticketmastery-api/migrations/0003_uc5_reporting_views.sql)), applied
   by the API's migration runner like every other migration, and checked row by row in
   [`test/reporting-views.test.ts`](../services/ticketmastery-api/test/reporting-views.test.ts) against orders made
   through the real organiser and checkout services.
-- **Design only:** Amazon QuickSight (now sold as *Amazon Quick Sight*) on top of those views. It is not in
-  Terraform and not subscribed, because it is billed per user per month (see [Why it is not deployed](#why-it-is-not-deployed)).
+- **Reports page:** `/organiser/reports` in the web app, backed by `GET /api/reports/sales` in the `reporting`
+  API module, which runs as its own (sixth) ECS service, `reporting`. It reads the five views live, only ever for the
+  signed-in organiser's concerts, and connects to RDS as the least-privilege role `reporting_ro` (migration `0004`),
+  whose password is in Secrets Manager. See [Reporting service](#reporting-service).
+- **QuickSight:** designed, not deployed (see [QuickSight](#quicksight)).
 
 The live organiser dashboard (`GET /api/organiser/concerts/:id/dashboard`, polled every 5 s) stays the tool for
-the on-sale moment. The views are for after-the-fact questions across concerts: how much did we sell, of what,
+the on-sale moment. The reports are for after-the-fact questions across concerts: how much did we sell, of what,
 on which day.
 
 ## Reporting views
@@ -24,7 +27,7 @@ job. Conventions shared by every view:
   are not sales.
 - **Money is integer cents, as `bigint`, per currency.** An order has one currency, but a concert can have ticket
   types in different currencies, so every sales view groups by `currency` and never adds across currencies.
-- **`organiser_id`** (the organiser's Cognito `sub`) is on every view, so a BI tool can apply row-level security.
+- **`organiser_id`** (the organiser's Cognito `sub`) is on every view; the Reports API filters every query on it.
 - **Cancelled concerts keep their sales** (no refunds exist yet). Filter on `concert_status` to leave them out.
 - **No buyer identities.** `fan_id` is not exposed; reporting doesn't need it.
 
@@ -48,8 +51,7 @@ Definitions:
   that day, one at 00:00:00 SGT on the next.
 - `report_seat_status` uses the live dashboard's definitions (view `concert_seat_counts` in `0001`): a hold that
   has expired but not yet been released counts as `available`, because any checkout can take the seat at once, so
-  `held` means active holds only. Counts are as of the query (in SPICE: as of the last refresh). Concerts without a
-  layout show all zeros.
+  `held` means active holds only. Counts are as of the query. Concerts without a layout show all zeros.
 
 Example: one organiser's revenue per concert, in dollars.
 
@@ -60,135 +62,71 @@ SELECT concert_title, currency, seats_sold, gross_revenue_cents / 100.0 AS gross
  ORDER BY concert_starts_at, currency;
 ```
 
-## QuickSight design (not deployed)
+## Reports page
 
-```mermaid
-flowchart LR
-  org[Organisers<br/>QuickSight Readers] --> dash[QuickSight dashboards<br/>row-level security on organiser_id]
-  dash --> spice[(SPICE datasets<br/>one per report_* view)]
-  spice -- scheduled refresh --> vpcc[QuickSight VPC connection<br/>ENIs in the private subnets, SG ticketmastery-dev-quicksight]
-  vpcc -- "5432, TLS, user quicksight_reader" --> rds[(RDS PostgreSQL<br/>report_* views)]
-```
+Route `/organiser/reports?days=7|30|90|all&concert=<id>` (code in
+[`frontend/src/pages/organiser/`](../frontend/src/pages/organiser/README.md)), linked from the organiser home page
+(**Reports**) and from each published concert (**View report**, which preselects that concert). Organisers only
+(`organisers` Cognito group), like the other organiser pages.
 
-### Edition and account
+Controls: period (last 7, 30 or 90 days, or all time; default 30) and concert (all or one). Both are kept in the
+URL. One API call loads the whole page:
 
-- **Enterprise edition**, in `ap-southeast-1` next to RDS. Enterprise is required for everything below: VPC
-  connections to a private database, row-level security and hourly refreshes. (Standard edition is now only
-  offered through the `CreateAccountSubscription` API and has none of these.)
-- Users: one **Author** (Elroy, also admin) builds datasets and dashboards. Organisers are **Readers**. No *Pro*
-  users and no Q&A topics, because either one adds a USD 250/month account fee.
-
-### Network: VPC connection to RDS
-
-RDS has no public endpoint and sits in the private subnets, so QuickSight reaches it through a
-[VPC connection](https://docs.aws.amazon.com/quick/latest/userguide/vpc-creating-a-connection-in-quicksight-cli.md),
-which places QuickSight network interfaces in our VPC:
-
-- **Subnets:** `private_subnet_ids` (the two private subnets, AZ a and AZ b; a VPC connection needs at least two).
-  QuickSight's ENIs need no internet access, so the missing NAT gateway does not matter.
-- **Security group** `ticketmastery-dev-quicksight` in the VPC: no inbound rules, one egress rule to the RDS
-  security group on 5432. (AWS's extra "allow all inbound TCP from the database SG" rule applies only to VPC
-  connections created before 27 April 2023;
-  [security group rules](https://docs.aws.amazon.com/quick/latest/userguide/vpc-security-groups.md).)
-- **RDS ingress:** add that security group's ID to the existing root variable `rds_extra_ingress_sg_ids`, which
-  the `security` module turns into an inbound rule on the RDS SG for port 5432. No other change to the RDS module.
-- **Execution role** trusted by `quicksight.amazonaws.com` with `ec2:CreateNetworkInterface`,
-  `ec2:ModifyNetworkInterfaceAttribute`, `ec2:DeleteNetworkInterface`, `ec2:DescribeSubnets` and
-  `ec2:DescribeSecurityGroups`, so QuickSight can manage its ENIs.
-
-These pieces are Terraform resources (`aws_security_group`, `aws_iam_role`, `aws_quicksight_vpc_connection`,
-`aws_quicksight_data_source`, `aws_quicksight_data_set`, `aws_quicksight_refresh_schedule`), so turning reporting
-on later is a new `infra/modules/reporting` module plus one entry in `rds_extra_ingress_sg_ids`. The account
-subscription and user invitations are console steps.
-
-### Database user: read-only, views only
-
-QuickSight connects as its own login, never the RDS master user. It can read the five views and nothing else:
-PostgreSQL views run with their owner's privileges, so the reporting user needs no grant on `orders`, `seats` or
-any other table, and cannot see fan ids or hold details.
-
-```sql
--- Run once as the master user. Keep the password in Secrets Manager, not in git.
-CREATE ROLE quicksight_reader LOGIN PASSWORD '<from Secrets Manager>';
-ALTER ROLE quicksight_reader SET default_transaction_read_only = on;
-ALTER ROLE quicksight_reader CONNECTION LIMIT 5;
-GRANT CONNECT ON DATABASE ticketmastery TO quicksight_reader;
-GRANT USAGE ON SCHEMA public TO quicksight_reader;
-GRANT SELECT ON report_confirmed_orders, report_sales_by_concert, report_sales_by_ticket_type,
-                report_sales_by_day, report_seat_status TO quicksight_reader;
-```
-
-This is not a migration on purpose: roles are cluster-wide (the tests' throwaway schemas would collide), a
-migration must not carry a password, and the user is only needed once QuickSight exists.
-
-The QuickSight data source is **PostgreSQL**, host = the RDS endpoint, database `ticketmastery`, **SSL on**
-(PostgreSQL 16 on RDS enforces TLS by default), through the VPC connection above.
-
-### Datasets and SPICE refresh
-
-Each `report_*` view is one dataset, imported into **SPICE** rather than queried directly, so opening a dashboard
-never adds load to the single `db.t4g.micro` that also serves checkout. The data is tiny (kilobytes per concert),
-well inside the 10 GB of SPICE included with the Author.
-
-| Dataset | Schedule (Asia/Singapore) | Why |
+| Section | Source view | Period |
 |---|---|---|
-| `report_sales_by_concert`, `report_sales_by_ticket_type`, `report_sales_by_day`, `report_confirmed_orders` | **Hourly** (Enterprise only) while any concert is on sale; **daily at 02:00** otherwise | Sales questions are about trends, not seconds. Each refresh is a handful of aggregate queries. |
-| `report_seat_status` | Hourly with the sales datasets | A snapshot for reports; the live API dashboard shows seconds-fresh counts. |
+| Summary KPIs per currency: gross revenue, tickets sold, orders, average order | `report_confirmed_orders` | selected |
+| Revenue by day (SVG bar chart, every Singapore day, zero days included) | `report_sales_by_day` | selected |
+| Revenue by concert (bars; cancelled concerts tagged) | `report_confirmed_orders`, titles from `report_sales_by_concert` | selected |
+| Ticket types: tickets sold, orders, ticket revenue | `report_sales_by_ticket_type` | **all time** (the view has no date) |
+| Seat status: available / held / sold / total, % sold | `report_seat_status` | now |
+| Recent orders: newest 50, short order id, seats, total, time; no fan identity | `report_confirmed_orders`, titles from `report_seat_status` | selected |
 
-Hourly schedules can't be combined with other schedules on the same dataset, so switching between "on-sale" and
-"quiet" means replacing the schedule (`aws_quicksight_refresh_schedule`, or the
-[refresh schedule settings](https://docs.aws.amazon.com/quick/latest/userguide/refreshing-imported-data.md)).
+Every section has **Download CSV**, built in the browser from the loaded data (no extra endpoint): RFC 4180
+quoting, money as a decimal with two places next to a `currency` column.
 
-### Dashboards for organisers
+### API
 
-One dashboard, **Concert sales**, shared with the organisers' Reader accounts:
+`GET /api/reports/sales?days=7|30|90|all&concertId=<uuid>`, `Cache-Control: no-store`. Rules (details in
+the [reporting module README](../services/ticketmastery-api/src/modules/reporting/README.md)):
 
-- **KPIs** per currency: gross revenue, ticket revenue, booking fees, seats sold, confirmed orders
-  (`report_sales_by_concert`).
-- **Sales per day** line chart, one line per concert (`report_sales_by_day`), with cumulative revenue.
-- **Ticket mix** bar chart: seats sold and revenue per ticket type, sorted by `ticket_type_sort_order`
-  (`report_sales_by_ticket_type`).
-- **Inventory** stacked bar per concert: sold / held / available out of total (`report_seat_status`), to spot
-  concerts that are slow to sell.
-- Filters: concert, currency, concert status (default: hide cancelled), date range.
+- Every query has `WHERE organiser_id = <caller's Cognito sub>`. A `concertId` that is not the caller's is refused
+  like on every organiser route (403 someone else's, 404 missing; looked up in `report_seat_status`, which has every
+  concert); a bad `days` or `concertId` is 400.
+- Period: Singapore calendar days on `sale_date_sgt`. `to` is today in Singapore and `from` is `days - 1` days
+  earlier; `all` has no lower bound, and its day chart starts at the first sale.
+- Money is integer cents per currency. Totals, concert and day rows are grouped by currency and never added across
+  currencies.
+- The six section queries run in parallel on the service's connection pool (no transaction; each reads only that
+  organiser's rows). Every query reads only the `report_*` views, never a table, because that is all `reporting_ro`
+  may read.
 
-**Row-level security** keeps each organiser to their own concerts: a rules dataset maps each QuickSight user name
-to the `organiser_id` (Cognito `sub`) it may see, applied to every dataset. The Author/admin account has no rule
-restriction and sees all organisers.
+Tested against Postgres in
+[`test/reporting.test.ts`](../services/ticketmastery-api/test/reporting.test.ts): another organiser's sales and
+non-confirmed orders are excluded, the day range and zero-filled days, the concert filter and its 403/404, totals
+equal to the sum of the concert rows, 400 for an invalid period, and every repository query run under
+`SET LOCAL ROLE reporting_ro` returns the same rows as under the migration owner (while `concerts` is refused).
 
-## Cost
+## Reporting service
 
-Prices from the [Amazon Quick Sight pricing page](https://aws.amazon.com/quick/quicksight/pricing/), checked
-**31 October 2026** (USD, per month):
-
-| Item | List price |
+| | |
 |---|---|
-| Author | $24 per user/month (includes 10 GB SPICE) |
-| Author Pro | $40 per user/month |
-| Reader | $3 per user/month |
-| Reader Pro | $20 per user/month |
-| Account infrastructure fee | $250/month if the account has any Pro user or Q&A enabled |
-| Reader capacity pricing | from $250/month for 500 sessions |
-| Extra SPICE | $0.38 per GB/month |
+| ECS service | `ticketmastery-dev-reporting` (`API_MODULES=reporting`), same image as the other five |
+| Routing | ALB rule `/api/reports`, `/api/reports/*` (priority 150); API Gateway `GET /api/reports`, `GET /api/reports/{proxy+}` with the Cognito JWT authorizer |
+| DB login | `reporting_ro`: `SELECT` on the five `report_*` views only (views run with their owner's rights, so no table grants), `default_transaction_read_only = on`, `CONNECTION LIMIT 10` |
+| Credentials | Secrets Manager `ticketmastery-dev/reporting/reporting-ro` (`{"username","password"}`), injected as `DB_USER`/`DB_PASSWORD` at task start. Terraform creates the secret empty (`infra/modules/rds`); `loadtest/scripts/reporting-user.sh` sets the password |
+| Pool and scaling | `DB_POOL_MAX=4`, autoscaling max 2 tasks: 8 connections, within the role's limit of 10 |
+| Migrations | off (`run_migrations_on_start = false`): the role can't create tables |
+| Alarms, dashboard | the per-service no-healthy-hosts and scaling-ceiling alarms and the dashboard lines, like every service |
 
-Smallest useful setup (1 Author + 2 Readers, no Pro, no Q&A, SPICE inside the included 10 GB):
+So a bug or injection in the reports code can read report rows at worst: it can't see fan ids or holds, and can't
+write. The data stays live: plain views, queried on every request, no cache. Deploy order (the secret needs a value
+before the service's first task starts): [deploy.md](deploy.md#reporting-service-database-login).
 
-$$24 + 2 \times 3 = \text{USD } 30 \text{ per month}$$
+## QuickSight
 
-The pricing page lists no charge for VPC connections, and the extra security group is free; the hourly SPICE
-refreshes add a few seconds of RDS work per hour.
-
-## Why it is not deployed
-
-- **Per-user monthly billing.** QuickSight charges each user per month, not per use, so it costs the same whether
-  anyone opens the dashboard or not.
-- **The course budget is USD 80 in total**, and the deployed stack alone is about USD 72 per month if left running
-  ([cost-estimate.md](cost-estimate.md)). The smallest QuickSight setup (USD 30 per month, USD 24 of it for the one
-  Author) would take over a third of the whole budget; reader capacity pricing (USD 250 per month minimum) is out of
-  reach.
-- **The graded use case is covered without it.** Organisers already get live counts from the API dashboard, and
-  the reporting data is real and tested: the views return the demo concert's sales and can be queried directly
-  (`psql`, or the RDS Query Editor) for the report.
-- **Switching it on is a console-and-Terraform step**, with no application change: subscribe to Enterprise, create
-  the read-only user, add the VPC connection's SG to `rds_extra_ingress_sg_ids`, import the five views into SPICE
-  and build the dashboard. Decided 2026-10-31 (see [plans/final-submission.md](plans/final-submission.md)).
+Amazon QuickSight (now *Amazon Quick Sight*) on top of the same views was the original design: SPICE datasets per
+view, a VPC connection to the private RDS, row-level security on `organiser_id`, organisers as Readers. Migration
+[`0004_uc5_reporting_role.sql`](../services/ticketmastery-api/migrations/0004_uc5_reporting_role.sql) creates the
+read-only `reporting_ro` role it would connect as (SELECT on the five views only). QuickSight can't be subscribed on
+the project's AWS Free-plan account, so reporting is served by the reporting service instead, which uses that same
+role, with the views as the shared data layer. Switching to QuickSight later needs no change to the views.

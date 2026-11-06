@@ -45,6 +45,9 @@ Organisers only manage concerts where `organiser_id` equals their Cognito `sub` 
 
   Without `ORDER_EVENTS_TOPIC_ARN` (local runs) nothing is published.
 
+Sales reports for organisers are not here: they are the [reporting module](../reporting/README.md)
+(`GET /api/reports/sales`), its own ECS service connected to RDS as the read-only `reporting_ro` role.
+
 ## Code
 
 - `router.ts`: HTTP + zod parsing only.

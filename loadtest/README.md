@@ -30,6 +30,7 @@ k6/*.js                setup-concert, nfr1, nfr2, nfr3, nfr4, nfr6
 scripts/lib.sh         AWS profile/account guard, resource names (ticketmastery-dev-*), DRY_RUN
 scripts/*.sh           Cognito users, metrics, drills, checks
 sql/oversell-check.js  NFR-3 SQL, run inside the API container (ECS Exec) or locally
+sql/reporting-role.js  sets or removes reporting_ro's login, run inside the API container by scripts/reporting-user.sh
 dev/fake-waiting-room.mjs  local dry runs only: the waiting room's contract in memory, proxying the rest
 state/                 gitignored: tokens.json, users.json, lt-password, concert.json
 ```
@@ -227,4 +228,11 @@ scripts/cognito-users.sh cleanup        # deletes success+lt*@simulator.amazonse
   definition; `DB_USER` / `DB_PASSWORD` injected from the RDS-managed secret) and uses the image's `pg` package.
 - The F4 restore keeps the master user and password of the restore point; `VERIFY=1` uses the task's current
   credentials, so it only works if the RDS-managed secret hasn't rotated since.
+- `scripts/reporting-user.sh` (not a load test; deploy step, see `docs/deploy.md`) gives the read-only `reporting_ro`
+  role a new random password and writes it to the `ticketmastery-dev/reporting/reporting-ro` secret that the
+  reporting ECS service logs in with, then forces a new deployment of that service. Same ECS Exec mechanism as the
+  oversell check, in an organiser task (master user; `SERVICE_KEY=reporting` is refused). Only a SCRAM-SHA-256
+  verifier crosses ECS Exec; the password exists only in a mode-600 `mktemp` file, removed on exit, that
+  `put-secret-value` reads with `file://`. `disable` sets the role back to `NOLOGIN` (the reporting service then fails
+  its health check); `DRY_RUN=1` prints the calls.
 - The stage throttle (100 req/s) and the WAF apply to everyone: don't demo the site while NFR-1/NFR-2 run.

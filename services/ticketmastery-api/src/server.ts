@@ -24,9 +24,16 @@ async function main() {
   // fast so ECS restarts the task instead of serving 401s. No-op in dev-header mode.
   await hydrateAuth();
 
+  // createApp() mounts exactly config.API_MODULES; logging them shows which use case(s) this ECS service serves.
   const server = createApp().listen(config.PORT, () => {
     logger.info(
-      { port: config.PORT, env: config.NODE_ENV, authMode: config.AUTH_MODE, version: appVersion },
+      {
+        port: config.PORT,
+        env: config.NODE_ENV,
+        authMode: config.AUTH_MODE,
+        modules: config.API_MODULES,
+        version: appVersion,
+      },
       'ticketmastery-api listening',
     );
   });

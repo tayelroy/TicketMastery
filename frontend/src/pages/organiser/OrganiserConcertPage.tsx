@@ -98,6 +98,9 @@ export function OrganiserConcertPage() {
             <Link to={`/concerts/${concert.id}`} className="btn ghost small">
               View public page
             </Link>
+            <Link to={`/organiser/reports?concert=${concert.id}`} className="btn ghost small">
+              View report
+            </Link>
           </div>
         )}
       </section>

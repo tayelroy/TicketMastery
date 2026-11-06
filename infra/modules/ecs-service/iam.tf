@@ -33,12 +33,14 @@ resource "aws_iam_role_policy_attachment" "execution_managed" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# The RDS-managed secret is encrypted with the AWS-managed aws/secretsmanager
-# key, so no explicit kms:Decrypt grant is needed.
+# Every distinct DB secret a service uses (main.tf local.db_secret_arns): the RDS-managed master secret and any
+# per-service one (services[*].db_secret_arn, e.g. the reporting service's reporting_ro login). Each is encrypted with
+# the AWS-managed aws/secretsmanager key, so no explicit kms:Decrypt grant is needed. The role is shared, but each
+# task definition names only its own secret, so a container only ever receives its own service's credentials.
 data "aws_iam_policy_document" "execution_secrets" {
   statement {
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = [var.db_secret_arn]
+    resources = local.db_secret_arns
   }
 }
 

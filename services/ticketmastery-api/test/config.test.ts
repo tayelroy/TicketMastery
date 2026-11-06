@@ -15,6 +15,8 @@ const cognitoIds = { COGNITO_USER_POOL_ID: 'ap-southeast-1_Abc', COGNITO_CLIENT_
 const COGNITO_MESSAGE =
   'AUTH_MODE=cognito needs COGNITO_USER_POOL_ID and COGNITO_CLIENT_ID ' +
   '(in AWS they come from module.auth_apigw outputs via extra_environment).';
+/** Spelled out rather than imported from modules/keys.ts, so a change to the key list shows up here. */
+const ALL_MODULES = ['discovery', 'account', 'waiting-room', 'checkout', 'organiser', 'reporting'];
 
 describe('config', () => {
   let envSchema: typeof ConfigModule.envSchema;
@@ -51,6 +53,7 @@ describe('config', () => {
         AUTH_MODE: 'dev-header',
         ALLOW_DEV_AUTH: false,
         RUN_MIGRATIONS_ON_START: false,
+        API_MODULES: ALL_MODULES,
       });
     });
 
@@ -115,6 +118,30 @@ describe('config', () => {
         issues({ ...base, NODE_ENV: 'staging' }).map((i) => i.split(':')[0]),
         ['NODE_ENV'],
       );
+    });
+  });
+
+  describe('API_MODULES', () => {
+    test('unset, empty or only commas/blanks = every module', () => {
+      assert.deepEqual(parse(base).API_MODULES, ALL_MODULES);
+      for (const blank of ['', '  ', ' , ,']) {
+        assert.deepEqual(parse({ ...base, API_MODULES: blank }).API_MODULES, ALL_MODULES, JSON.stringify(blank));
+      }
+    });
+
+    test('a subset is kept in registry order, trimmed and without duplicates', () => {
+      assert.deepEqual(parse({ ...base, API_MODULES: 'checkout' }).API_MODULES, ['checkout']);
+      assert.deepEqual(parse({ ...base, API_MODULES: ' organiser, discovery ,organiser' }).API_MODULES, [
+        'discovery',
+        'organiser',
+      ]);
+    });
+
+    test('unknown keys are refused with the accepted list', () => {
+      assert.deepEqual(issues({ ...base, API_MODULES: 'checkout,wroom,Discovery' }), [
+        'API_MODULES: unknown module wroom, Discovery; expected a comma-separated subset of ' +
+          'discovery, account, waiting-room, checkout, organiser, reporting',
+      ]);
     });
   });
 

@@ -64,6 +64,76 @@ export interface Dashboard {
   totals: { available: number; held: number; sold: number; total: number; revenueCents: number };
 }
 
+export type ReportDays = '7' | '30' | '90' | 'all';
+
+/**
+ * GET /api/reports/sales (reporting module, its own ECS service). Money is integer cents in `currency`; amounts are
+ * never added across currencies. Dates are Singapore calendar days (YYYY-MM-DD).
+ */
+export interface SalesReport {
+  /** `from: null` = all time (since the first sale); `to` is today in Singapore. */
+  range: { days: number | null; from: string | null; to: string };
+  concertId: string | null;
+  /** In the range, per currency. */
+  totals: {
+    currency: string;
+    confirmedOrders: number;
+    seatsSold: number;
+    ticketRevenueCents: number;
+    bookingFeeCents: number;
+    grossRevenueCents: number;
+    averageOrderCents: number;
+  }[];
+  /** In the range, gross descending. */
+  byConcert: {
+    concertId: string;
+    title: string;
+    artist: string;
+    venueName: string;
+    startsAt: string;
+    status: ConcertStatus;
+    currency: string;
+    confirmedOrders: number;
+    seatsSold: number;
+    ticketRevenueCents: number;
+    bookingFeeCents: number;
+    grossRevenueCents: number;
+  }[];
+  /** Every day of the range (zero-filled), per currency with sales in the range. */
+  byDay: { date: string; currency: string; confirmedOrders: number; seatsSold: number; grossRevenueCents: number }[];
+  /** ALL TIME, whatever the range: the ticket type view has no date. */
+  byTicketType: {
+    concertId: string;
+    concertTitle: string;
+    ticketTypeName: string;
+    currency: string;
+    confirmedOrders: number;
+    seatsSold: number;
+    ticketRevenueCents: number;
+  }[];
+  /** Current counts, every concert (drafts included). */
+  seatStatus: {
+    concertId: string;
+    title: string;
+    startsAt: string;
+    status: ConcertStatus;
+    available: number;
+    held: number;
+    sold: number;
+    total: number;
+  }[];
+  /** In the range, newest first, at most 50. */
+  recentOrders: {
+    orderId: string;
+    concertId: string;
+    concertTitle: string;
+    seats: number;
+    grossRevenueCents: number;
+    currency: string;
+    confirmedAt: string;
+  }[];
+}
+
 export const STATUS_LABELS: Record<ConcertStatus, string> = {
   draft: 'Draft',
   scheduled: 'Published',

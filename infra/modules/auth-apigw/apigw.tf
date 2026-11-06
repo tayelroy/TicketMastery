@@ -27,6 +27,9 @@ locals {
     "ANY /api/checkout/{proxy+}",
     "ANY /api/organiser",
     "ANY /api/organiser/{proxy+}",
+    # UC5 sales reports (reporting service): read-only, so GET only.
+    "GET /api/reports",
+    "GET /api/reports/{proxy+}",
   ], var.waiting_room_public ? [] : local.waiting_room_routes, var.extra_protected_routes))
 }
 
@@ -84,6 +87,33 @@ resource "random_password" "origin_verify" {
 
   length  = 48
   special = false # header-safe characters only
+}
+
+# One rule per non-default ECS service (priorities 1-9): header AND its paths -> its target group. Rule 10 then sends
+# every other request with the header to the default service.
+resource "aws_lb_listener_rule" "from_api_gateway_path" {
+  count = local.use_origin_header ? length(var.api_path_routes) : 0
+
+  listener_arn = var.alb_listener_arn # HTTPS :443
+  priority     = count.index + 1
+
+  action {
+    type             = "forward"
+    target_group_arn = var.api_path_routes[count.index].target_group_arn
+  }
+
+  condition {
+    http_header {
+      http_header_name = "x-origin-verify"
+      values           = [random_password.origin_verify[0].result]
+    }
+  }
+
+  condition {
+    path_pattern {
+      values = var.api_path_routes[count.index].path_patterns
+    }
+  }
 }
 
 resource "aws_lb_listener_rule" "from_api_gateway" {

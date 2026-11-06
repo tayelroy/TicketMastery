@@ -23,30 +23,24 @@ variable "alb_arn_suffix" {
   type        = string
 }
 
-variable "target_group_arn_suffix" {
-  description = "API target group ARN suffix (targetgroup/<name>/<id>), the TargetGroup dimension (ecs-service output target_group_arn_suffix)."
-  type        = string
-}
-
 variable "ecs_cluster_name" {
   description = "ECS cluster name (ecs-service output cluster_name)."
   type        = string
 }
 
-variable "ecs_service_name" {
-  description = "ECS API service name (ecs-service output service_name)."
-  type        = string
+variable "ecs_services" {
+  description = "The API's ECS services, keyed by a static service key used in alarm names and dashboard labels (from ecs-service output services): ECS service name, target group ARN suffix (targetgroup/<name>/<id>, the TargetGroup dimension) and autoscaling maximum (threshold of its scaling-ceiling alarm)."
+  type = map(object({
+    service_name             = string
+    target_group_arn_suffix  = string
+    autoscaling_max_capacity = number
+  }))
 }
 
 variable "autoscaling_enabled" {
-  description = "Whether ECS service autoscaling is on (root enable_autoscaling). The scaling-ceiling alarm only exists when it is: with a fixed task count the service is always \"at max\"."
+  description = "Whether ECS service autoscaling is on (root enable_autoscaling). The scaling-ceiling alarms only exist when it is: with a fixed task count a service is always \"at max\"."
   type        = bool
   default     = false
-}
-
-variable "autoscaling_max_capacity" {
-  description = "ECS autoscaling maximum task count (root autoscaling_max_capacity); threshold of the scaling-ceiling alarm and the dashboard line."
-  type        = number
 }
 
 variable "rds_instance_id" {

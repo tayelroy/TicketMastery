@@ -101,13 +101,13 @@ variable "container_port" {
 }
 
 variable "task_cpu" {
-  description = "Fargate task CPU units."
+  description = "Default Fargate task CPU units for every ECS service (ecs_services[*].cpu overrides)."
   type        = number
   default     = 256
 }
 
 variable "task_memory" {
-  description = "Fargate task memory (MiB)."
+  description = "Default Fargate task memory (MiB) for every ECS service (ecs_services[*].memory overrides)."
   type        = number
   default     = 512
 }
@@ -130,14 +130,97 @@ variable "tasks_single_az" {
   default     = true
 }
 
+variable "ecs_services" {
+  description = <<-EOT
+    One ECS service per use case (all from the same image; API_MODULES selects the routes). Key = service key
+    (ECS service ticketmastery-dev-<key>). discovery is the ALB default (unmatched paths and /health); the others
+    need path_patterns and a fixed listener_priority (> 20). Unset desired_count / autoscaling_min / cpu / memory /
+    autoscaling_max fall back to desired_count, autoscaling_min_capacity, task_cpu, task_memory,
+    autoscaling_max_capacity; values set here win over those. See infra/README.md.
+    db_user picks the database login: "master" (the RDS-managed master secret, default) or "reporting_ro" (the
+    read-only reporting role's secret, module.rds); main.tf turns it into the service's db_secret_arn, because a
+    variable default cannot reference a resource ARN. run_migrations_on_start and extra_environment override the
+    globals of the same name per service (extra_environment is merged over the global one).
+  EOT
+  type = map(object({
+    modules                 = list(string)
+    path_patterns           = optional(list(string), [])
+    listener_priority       = optional(number)
+    tg_short_name           = optional(string)
+    desired_count           = optional(number)
+    autoscaling_min         = optional(number)
+    autoscaling_max         = optional(number)
+    cpu                     = optional(number)
+    memory                  = optional(number)
+    db_user                 = optional(string, "master")
+    run_migrations_on_start = optional(bool)
+    extra_environment       = optional(map(string), {})
+  }))
+  default = {
+    # UC1 browse + seat map: the read-heavy path, first to need more tasks at an on-sale.
+    discovery = {
+      modules         = ["discovery"]
+      autoscaling_max = 3
+    }
+    # UC2 my tickets and account.
+    account = {
+      modules           = ["account"]
+      path_patterns     = ["/api/me", "/api/me/*"]
+      listener_priority = 110
+      autoscaling_max   = 2
+    }
+    # UC3 waiting room; "wroom" keeps the target group name within 32 characters.
+    waiting-room = {
+      modules           = ["waiting-room"]
+      path_patterns     = ["/api/waiting-room", "/api/waiting-room/*"]
+      listener_priority = 120
+      tg_short_name     = "wroom"
+      autoscaling_max   = 3
+    }
+    # UC4 seat holds and checkout.
+    checkout = {
+      modules           = ["checkout"]
+      path_patterns     = ["/api/checkout", "/api/checkout/*"]
+      listener_priority = 130
+      autoscaling_max   = 3
+    }
+    # UC5 organiser concert management.
+    organiser = {
+      modules           = ["organiser"]
+      path_patterns     = ["/api/organiser", "/api/organiser/*"]
+      listener_priority = 140
+      autoscaling_max   = 2
+    }
+    # UC5 sales reports, live from the report_* views, as the read-only reporting_ro role: it can SELECT those five
+    # views and nothing else, so it cannot run migrations. Its connection limit is 10: 2 tasks x DB_POOL_MAX 4 = 8,
+    # leaving 2 for reporting-user.sh checks or psql. (During a deployment old and new tasks overlap, but a pool only
+    # opens connections that concurrent requests need and closes idle ones after 30s; over the limit a request
+    # fails, the task does not.)
+    reporting = {
+      modules                 = ["reporting"]
+      path_patterns           = ["/api/reports", "/api/reports/*"]
+      listener_priority       = 150
+      autoscaling_max         = 2
+      db_user                 = "reporting_ro"
+      run_migrations_on_start = false
+      extra_environment       = { DB_POOL_MAX = "4" }
+    }
+  }
+
+  validation {
+    condition     = alltrue([for s in values(var.ecs_services) : contains(["master", "reporting_ro"], s.db_user)])
+    error_message = "ecs_services[*].db_user must be \"master\" or \"reporting_ro\"."
+  }
+}
+
 variable "desired_count" {
-  description = "Number of API tasks."
+  description = "Default task count for every ECS service (ecs_services[*].desired_count overrides)."
   type        = number
   default     = 1
 }
 
 variable "run_migrations_on_start" {
-  description = "Run the API's SQL migrations when each task starts."
+  description = "Run the API's SQL migrations when each task starts (every service whose ecs_services entry doesn't override it; advisory-locked, so only one task applies them)."
   type        = bool
   default     = true
 }
@@ -173,19 +256,19 @@ variable "log_retention_days" {
 }
 
 variable "enable_autoscaling" {
-  description = "Enable ECS service autoscaling on CPU and ALB request count. Off for the implementation; on in the HA design."
+  description = "Enable autoscaling on CPU and ALB request count for every ECS service, each with its own min/max. Off for the implementation; on in the HA design."
   type        = bool
   default     = false
 }
 
 variable "autoscaling_min_capacity" {
-  description = "Minimum API task count when autoscaling. Use 2 in the HA design so scale-in never drops below one task per AZ."
+  description = "Default minimum task count per service when autoscaling (ecs_services[*].autoscaling_min overrides). Use 2 in the HA design so scale-in never drops below one task per AZ."
   type        = number
   default     = 1
 }
 
 variable "autoscaling_max_capacity" {
-  description = "Maximum API task count when autoscaling."
+  description = "Default maximum task count when autoscaling, for services whose ecs_services entry sets no autoscaling_max (the dev defaults set it for all six)."
   type        = number
   default     = 2
 }

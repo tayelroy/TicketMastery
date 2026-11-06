@@ -1,5 +1,8 @@
 data "aws_region" "current" {}
 
+# One log group for every service: each task's streams are prefixed with its service key
+# (<key>/ticketmastery-api/<task-id>), so one Logs Insights query or metric filter (monitoring's checkout-failure
+# filters) still covers the whole API, and per-service views are a stream-prefix filter away.
 resource "aws_cloudwatch_log_group" "api" {
   name              = var.log_group_name
   retention_in_days = var.log_retention_days
@@ -15,7 +18,38 @@ resource "aws_ecs_cluster" "this" {
 }
 
 ################################################################################
-# Task definition
+# Services (one per use case)
+################################################################################
+
+locals {
+  # Per-service settings with the module-wide defaults filled in.
+  services = {
+    for k, s in var.services : k => {
+      modules           = s.modules
+      path_patterns     = s.path_patterns
+      listener_priority = s.listener_priority
+      tg_name           = "${var.name}-${coalesce(s.tg_short_name, k)}-tg"
+      desired_count     = coalesce(s.desired_count, var.desired_count)
+      autoscaling_min   = coalesce(s.autoscaling_min, var.autoscaling_min_capacity)
+      autoscaling_max   = coalesce(s.autoscaling_max, var.autoscaling_max_capacity)
+      cpu               = coalesce(s.cpu, var.task_cpu)
+      memory            = coalesce(s.memory, var.task_memory)
+      db_secret_arn     = coalesce(s.db_secret_arn, var.db_secret_arn)
+      # Not coalesce(): an explicit false must win over a true default.
+      run_migrations_on_start = s.run_migrations_on_start != null ? s.run_migrations_on_start : var.run_migrations_on_start
+      extra_environment       = s.extra_environment
+    }
+  }
+
+  # Every DB secret some service reads (the execution role's GetSecretValue grant, iam.tf).
+  db_secret_arns = distinct([for s in values(local.services) : s.db_secret_arn])
+
+  # Everything except the default service gets a path-based listener rule.
+  routed_services = { for k, s in local.services : k => s if k != var.default_service }
+}
+
+################################################################################
+# Task definitions
 ################################################################################
 
 locals {
@@ -33,13 +67,11 @@ locals {
       # The API refuses NODE_ENV=production + dev-header unless this is true;
       # derived so it turns off automatically when auth_mode = "cognito".
       ALLOW_DEV_AUTH = var.auth_mode == "dev-header" ? "true" : "false"
-      # Migrations take a pg advisory lock, so concurrent tasks don't race.
-      RUN_MIGRATIONS_ON_START = tostring(var.run_migrations_on_start)
     },
     var.extra_environment,
   )
 
-  container_definition = merge(
+  container_base = merge(
     {
       name      = var.container_name
       image     = "${var.ecr_repository_url}:${var.image_tag}"
@@ -52,23 +84,6 @@ locals {
           protocol      = "tcp"
         }
       ]
-
-      environment = [for k in sort(keys(local.environment)) : { name = k, value = local.environment[k] }]
-
-      # Resolved by the execution role at task start from the RDS-managed secret JSON.
-      secrets = [
-        { name = "DB_USER", valueFrom = "${var.db_secret_arn}:username::" },
-        { name = "DB_PASSWORD", valueFrom = "${var.db_secret_arn}:password::" },
-      ]
-
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          awslogs-group         = aws_cloudwatch_log_group.api.name
-          awslogs-region        = data.aws_region.current.name
-          awslogs-stream-prefix = "api"
-        }
-      }
     },
     # Only emit healthCheck when enabled; a null key causes perpetual diffs.
     {
@@ -83,27 +98,65 @@ locals {
       } : k => v if var.enable_container_health_check
     },
   )
+
+  container_definitions = {
+    for k, s in local.services : k => merge(local.container_base, {
+      # Service extra_environment over the module-wide one; API_MODULES last, so neither can change which routes a
+      # service mounts.
+      environment = [
+        for name, value in merge(
+          {
+            # Migrations take a pg advisory lock, so concurrent tasks (of any service) don't race;
+            # whichever starts first applies them, the others find nothing left to do.
+            RUN_MIGRATIONS_ON_START = tostring(s.run_migrations_on_start)
+          },
+          local.environment,
+          s.extra_environment,
+          { API_MODULES = join(",", s.modules) },
+        ) : { name = name, value = value }
+      ]
+
+      # Resolved by the execution role at task start from the secret JSON (keys username/password): the
+      # RDS-managed master secret unless the service sets its own db_secret_arn.
+      secrets = [
+        { name = "DB_USER", valueFrom = "${s.db_secret_arn}:username::" },
+        { name = "DB_PASSWORD", valueFrom = "${s.db_secret_arn}:password::" },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.api.name
+          awslogs-region        = data.aws_region.current.name
+          awslogs-stream-prefix = k
+        }
+      }
+    })
+  }
 }
 
-resource "aws_ecs_task_definition" "api" {
-  family                   = "${var.name}-api"
+resource "aws_ecs_task_definition" "this" {
+  for_each = local.services
+
+  family                   = "${var.name}-${each.key}"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = tostring(var.task_cpu)
-  memory                   = tostring(var.task_memory)
-  execution_role_arn       = aws_iam_role.execution.arn
-  task_role_arn            = aws_iam_role.task.arn
+  cpu                      = tostring(each.value.cpu)
+  memory                   = tostring(each.value.memory)
+  # One shared execution role and task role for every service (next step: a task role per service).
+  execution_role_arn = aws_iam_role.execution.arn
+  task_role_arn      = aws_iam_role.task.arn
 
   runtime_platform {
     operating_system_family = "LINUX"
     cpu_architecture        = var.cpu_architecture
   }
 
-  container_definitions = jsonencode([local.container_definition])
+  container_definitions = jsonencode([local.container_definitions[each.key]])
 }
 
 ################################################################################
-# Service
+# ECS services
 ################################################################################
 
 locals {
@@ -122,11 +175,13 @@ locals {
   task_subnet_ids  = var.tasks_single_az ? slice(local.task_subnet_pool, 0, 1) : local.task_subnet_pool
 }
 
-resource "aws_ecs_service" "api" {
-  name             = "${var.name}-api"
+resource "aws_ecs_service" "this" {
+  for_each = local.services
+
+  name             = "${var.name}-${each.key}"
   cluster          = aws_ecs_cluster.this.id
-  task_definition  = aws_ecs_task_definition.api.arn
-  desired_count    = var.desired_count
+  task_definition  = aws_ecs_task_definition.this[each.key].arn
+  desired_count    = each.value.desired_count
   launch_type      = "FARGATE"
   platform_version = "LATEST"
 
@@ -141,7 +196,7 @@ resource "aws_ecs_service" "api" {
   }
 
   load_balancer {
-    target_group_arn = aws_lb_target_group.api.arn
+    target_group_arn = aws_lb_target_group.this[each.key].arn
     container_name   = var.container_name
     container_port   = var.container_port
   }
@@ -157,11 +212,25 @@ resource "aws_ecs_service" "api" {
 
   propagate_tags = "SERVICE"
 
-  # Task definition changes ARE managed by Terraform (no ignore_changes): bump
-  # image_tag (or push a new `latest` and force a new deployment) to roll out.
+  # Task definition changes ARE managed by Terraform: bump image_tag to roll out.
+  # desired_count is only the starting count: autoscaling owns it afterwards, and an apply in the middle of a
+  # scale-out would otherwise reset the service to 1 task. To change it on a running service, use
+  # `aws ecs update-service --desired-count` (or the autoscaling min/max).
 
+  lifecycle {
+    ignore_changes = [desired_count]
+
+    precondition {
+      condition     = contains(keys(var.services), var.default_service)
+      error_message = "default_service must be a key of services."
+    }
+  }
+
+  # ECS refuses a target group that no listener (default action or rule) uses yet.
   depends_on = [
     aws_lb_listener.http,
+    aws_lb_listener.https,
+    aws_lb_listener_rule.path,
     aws_iam_role_policy_attachment.execution_managed,
     aws_iam_role_policy.execution_secrets,
   ]

@@ -23,11 +23,17 @@ require_aws() {
 
 NAME="${NAME:-ticketmastery-dev}"
 CLUSTER="${CLUSTER:-$NAME-cluster}"
-SERVICE="${SERVICE:-$NAME-api}"
+# The API runs as one ECS service per use case (ticketmastery-dev-<key>: discovery, account, waiting-room, checkout,
+# organiser, reporting). SERVICE_KEY picks the one the ECS/ALB scripts look at; discovery (UC1 browse) is the default
+# because it serves the browse load tests and /health. Its target group is <name>-<key>-tg, except waiting-room
+# (-wroom-tg).
+SERVICE_KEY="${SERVICE_KEY:-discovery}"
+SERVICE="${SERVICE:-$NAME-$SERVICE_KEY}"
 CONTAINER="${CONTAINER:-ticketmastery-api}"
 DB_INSTANCE="${DB_INSTANCE:-$NAME-postgres}"
 ALB_NAME="${ALB_NAME:-$NAME-alb}"
-TARGET_GROUP_NAME="${TARGET_GROUP_NAME:-$NAME-api-tg}"
+TARGET_GROUP_NAME="${TARGET_GROUP_NAME:-$NAME-$([[ "$SERVICE_KEY" == waiting-room ]] && echo wroom || echo "$SERVICE_KEY")-tg}"
+SERVICE_KEYS=(discovery account waiting-room checkout organiser reporting)
 TICKET_FN_LOG_GROUP="${TICKET_FN_LOG_GROUP:-/aws/lambda/$NAME-ticket-fn}"
 TICKET_QUEUE_NAME="${TICKET_QUEUE_NAME:-$NAME-ticket-queue}"
 USER_POOL_NAME="${USER_POOL_NAME:-$NAME-users}"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Server-side view of a load-test window from CloudWatch (read-only): ALB TargetResponseTime p95/p99, RequestCount,
-# target and ALB 5xx, healthy targets, and ECS service CPU, per minute plus one overall row.
+# target and ALB 5xx (whole ALB), plus healthy targets and ECS CPU of one API service (SERVICE_KEY, default discovery:
+# the browse service; e.g. SERVICE_KEY=checkout for a checkout test), per minute plus one overall row.
 #
 #   scripts/alb-metrics.sh <label> <start ISO-8601> <end ISO-8601>
 #   e.g. scripts/alb-metrics.sh nfr1 2026-11-02T03:00:00Z 2026-11-02T03:06:00Z
