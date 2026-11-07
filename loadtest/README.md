@@ -15,6 +15,7 @@ two drills (F1 stops the API task, F4 restores RDS to a new instance and deletes
 | NFR-7 | 95% of e-tickets within 60 s | `scripts/nfr7-eticket.sh` | `results/nfr7-eticket-*` |
 | NFR-8/9 | F4: PITR, RPO ≤ 30 min, RTO ≤ 1 h | `scripts/nfr8-f4-pitr.sh` | `results/nfr8-f4-pitr-*` |
 | NFR-10 | HTTPS, encryption at rest, private DB | `scripts/nfr10-config.sh` | `results/nfr10-config-*` |
+| All of the above together | a whole on-sale: queue, admission, contention, payment, e-tickets, scaling | `scripts/flash-sale.sh` (runs `k6/flash-sale.js`) | `results/flash-sale-*` (+ `-fans.log`, `-ecs.csv`), `flash-sale-k6-*` |
 
 Each run writes `results/<test>-<UTC timestamp>.json` and a `.md` table to paste into the report
 (see [`results/README.md`](results/README.md)).
@@ -218,6 +219,22 @@ scripts/nfr3-oversell-check.sh          # final all-concerts check
 scripts/cancel-loadtest-concerts.sh     # removes the load-test concerts from the listing
 scripts/cognito-users.sh cleanup        # deletes success+lt*@simulator.amazonses.com users and state/
 ```
+
+## Flash-sale simulation
+
+One script runs a whole on-sale against dev and writes one report (plan, profiles and pass criteria:
+[`docs/plans/flash-sale-simulation.md`](../docs/plans/flash-sale-simulation.md)). It creates its own users and
+concert, so it never touches the demo concert.
+
+```bash
+PROFILE=smoke scripts/flash-sale.sh                 # 40 fans, 30 seats, ≈ 8 min
+PROFILE=standard CLEANUP=1 scripts/flash-sale.sh    # 400 fans, 300 seats: the evidence run
+PROFILE=peak BACKOFF=1 scripts/flash-sale.sh        # 999 fans: over the 100 req/s throttle, with 429 backoff
+```
+
+The report (`results/flash-sale-<ts>.md`) has the pass checks (oversell SQL, capacity, outcomes, fair admission, 5xx,
+DB connections), fan outcomes and timings, 429s, max tasks per service, waiting-room peak, RDS peak, e-tickets and
+the alarms that fired. `CLEANUP=1` cancels the concert and deletes the test users afterwards.
 
 ## Notes
 

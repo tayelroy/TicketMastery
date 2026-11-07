@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cancels the organiser's load-test concerts ("Load test ..." and "Waiting-room order ...") so they leave the public
+# Cancels the organiser's load-test concerts ("Load test ...", "Waiting-room order ..." and "Flash sale ...") so they leave the public
 # listing. Run before scripts/cognito-users.sh cleanup (it signs in as the load-test organiser).
 #
 #   AUTH=cognito scripts/cancel-loadtest-concerts.sh            # BASE_URL defaults to the API Gateway URL
@@ -19,7 +19,7 @@ fi
 API="${BASE_URL%/}/api/organiser/concerts"
 
 IDS="$(curl -sf "${H[@]}" "$API" | jq -r '(if type == "array" then . else .concerts end)[]
-  | select((.title | test("^(Load test|Waiting-room order) ")) and .status != "cancelled" and .status != "completed") | .id')" \
+  | select((.title | test("^(Load test|Waiting-room order|Flash sale) ")) and .status != "cancelled" and .status != "completed") | .id')" \
   || die "could not list the organiser's concerts"
 [[ -n "$IDS" ]] || { log "no load-test concerts to cancel"; exit 0; }
 for id in $IDS; do
