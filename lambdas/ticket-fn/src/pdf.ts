@@ -56,7 +56,7 @@ function drawQr(page: PDFPage, text: string, x: number, y: number, size: number)
   }
 }
 
-/** One A4 page: concert, order id + QR code, a line per seat, and the totals. Checkout caps an order at 20 seats. */
+/** One A4 page: concert, order id + QR code, a line per seat, and the totals. Checkout caps an order at 3 seats. */
 export async function renderTicketPdf(event: OrderConfirmedEvent): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   // Fixed dates make a retry render the same document as the first attempt.

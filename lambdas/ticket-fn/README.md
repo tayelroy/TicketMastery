@@ -32,7 +32,7 @@ For `OrderConfirmed`:
 2. Skips the order if the sent marker `tickets/<orderId>.sent` exists (see [Idempotency](#idempotency)).
 3. Renders the PDF ([`src/pdf.ts`](src/pdf.ts), pdf-lib): concert title, artist, venue, start time in Singapore time,
    order id with a QR code of it, one line per seat (section, row, seat, ticket type, price), subtotal, booking fee,
-   total. Checkout caps an order at 20 seats, which fit on one A4 page.
+   total. Checkout caps an order at 3 seats, so it always fits on one A4 page.
 4. Writes it to `s3://<TICKET_PDF_BUCKET>/tickets/<orderId>.pdf` (`application/pdf`), the key the API's
    [account module](../../services/ticketmastery-api/src/modules/account/README.md) pre-signs for downloads.
 5. Looks up the fan's email with Cognito `AdminGetUser` (`Username` = the event's `fanId`: the pool signs in by email,
