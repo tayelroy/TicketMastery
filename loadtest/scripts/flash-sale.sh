@@ -14,10 +14,6 @@
 # Never touches the demo concert: it creates its own and uses load-test users only (SES mailbox simulator).
 source "$(dirname "$0")/lib.sh"
 
-# A run takes 5–20 minutes; on macOS keep the machine from sleeping meanwhile (a sleeping laptop pauses every fan).
-if [[ "$(uname)" == Darwin && -z "${FLASH_SALE_AWAKE:-}" ]] && command -v caffeinate >/dev/null; then
-  FLASH_SALE_AWAKE=1 exec caffeinate -dims "$0" "$@"
-fi
 PROFILE="${PROFILE:-smoke}"
 case "$PROFILE" in
   smoke)    d_fans=40;  d_seats=30;  d_browse=5;  d_browse_dur=5m ;;
