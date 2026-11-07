@@ -1,15 +1,14 @@
 import { z } from 'zod';
+import { MAX_SEATS_PER_ORDER } from '../seat-limits';
 
-/** Hard cap per request; the real per-ticket-type limit is ticket_types.max_per_order (at most 20). */
-export const MAX_SEATS_PER_HOLD = 20;
-
+/** 1-3 seats per hold (one hold = one order); ticket_types.max_per_order (also at most 3) can lower it per type. */
 export const createHoldBody = z
   .object({
     concertId: z.uuid(),
     seatIds: z
       .array(z.uuid())
       .min(1)
-      .max(MAX_SEATS_PER_HOLD)
+      .max(MAX_SEATS_PER_ORDER)
       .refine((ids) => new Set(ids).size === ids.length, { message: 'seat ids must be unique' }),
   })
   .strict();

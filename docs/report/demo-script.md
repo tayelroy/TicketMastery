@@ -135,7 +135,7 @@ one session per browser profile).
   "Sale closes" and "Show starts" at their defaults (the sale opens in a week). Click **"Create draft"**.
 - **Audience sees:** the concert page with status "Draft" and the "Ticket types" table (Name, Description,
   Price (SGD), Quantity, Max / order).
-- **Do:** Name `CAT1`, Price `88`, Quantity `20` (Max / order stays `4`) → **"Save ticket types"**.
+- **Do:** Name `CAT1`, Price `88`, Quantity `20` (Max / order stays `3`, the most a fan can buy per order) → **"Save ticket types"**.
 - **Audience sees:** the ticket types form reloads with the saved row, and a "Seat layout" panel appears: "No layout
   saved yet. A starting layout is filled in from your ticket types; adjust it and save." and the tally
   "CAT1: 20 / 20 seats".

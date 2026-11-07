@@ -37,9 +37,9 @@ time). `201`:
 
 | Status | `error.code` | When |
 |---|---|---|
-| 400 | `validation_error` | bad body (1–20 unique seat uuids) |
+| 400 | `validation_error` | bad body (1–3 unique seat uuids: a fan buys at most 3 seats per order) |
 | 400 | `unknown_seats` | a seat isn't in this concert (`details.seatIds`) |
-| 400 | `too_many_seats` | more than the ticket type's `max_per_order` |
+| 400 | `too_many_seats` | more than the ticket type's `max_per_order` (1–3) |
 | 403 | `not_admitted` | not admitted from the waiting room, or the 15-minute admission ran out (see [Waiting-room admission](#waiting-room-admission)); the page sends the fan to the waiting room |
 | 404 | `not_found` | no such concert |
 | 409 | `not_on_sale` | concert not `scheduled`/`on_sale`, or outside its sale window |

@@ -29,7 +29,7 @@ Each fan (one k6 VU) does what the web app does:
 1. **Arrives** in a front-loaded wave over `ARRIVAL_SEC` (most in the first third), opens the concert page.
 2. **Joins** the waiting room and **polls** `GET …/status` every `POLL_SEC` (5 s, like the page). `BACKOFF=1` adds
    jittered exponential backoff on `429`, the production fix proposed in report §2.2; `BACKOFF=0` is today's page.
-3. When **admitted**, reads the checkout seat map and picks 1–4 seats (weighted 15/50/15/20 %), biased to the front
+3. When **admitted**, reads the checkout seat map and picks 1–3 seats (weighted 25/55/20 %; a fan buys at most 3 seats per order), biased to the front
    rows so fans compete for the same seats.
 4. **Holds** them; on `409 seats_unavailable` refreshes and retries (up to `MAX_ATTEMPTS`); stops on sold out.
 5. **Thinks** for a few seconds, then **pays**: `PAY_FAIL_RATE` are declined (the fan tries again), `ABANDON_RATE`
@@ -91,7 +91,7 @@ sale, so the run also shows that browsing load scales `discovery` and not `check
 
 ## First run (7 Nov 2026, `smoke`)
 
-40 fans for 30 seats, browsing at 5 req/s: **all checks PASS**. 13 orders sold all 30 seats, because an order holds 1–4
+40 fans for 30 seats, browsing at 5 req/s: **all checks PASS**. 13 orders sold all 30 seats. This run predates the 1–3 seats per order rule: an order then held 1–4
 seats (1 order of 1 seat, 9 of 2, 1 of 3, 2 of 4 = 30); the SQL check agrees: 13 confirmed orders, 30 seats in them,
 30 seats sold, 0 seats in two orders. 26 fans found it sold out, 1 abandoned; 25 lost seat races (409); 0 5xx, 0 429. Arrival to admission
 p95 53 s (one admit run a minute), arrival to order p95 52 s; hold p95 286 ms. 13 e-tickets, p95 6 s. Peak 9 RDS

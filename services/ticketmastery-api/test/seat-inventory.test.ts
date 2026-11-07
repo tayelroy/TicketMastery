@@ -36,7 +36,7 @@ describe('seat inventory (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
       startsAt: new Date(Date.now() + 3 * day).toISOString(),
     });
     await service.replaceTicketTypes(ORGANISER, concert.id, {
-      ticketTypes: [{ name: 'GA', priceCents: 10_000, currency: 'SGD', quantity: seatCount, maxPerOrder: 4 }],
+      ticketTypes: [{ name: 'GA', priceCents: 10_000, currency: 'SGD', quantity: seatCount, maxPerOrder: 3 }],
     });
     await service.replaceLayout(ORGANISER, concert.id, {
       sections: [{ name: 'Floor', rows: [{ label: 'A', ticketTypeName: 'GA', seats: { from: 1, to: seatCount } }] }],

@@ -3,7 +3,7 @@
 // scripts/flash-sale.sh, which creates the users and the concert and collects the AWS-side evidence.
 //
 // Each fan (one VU): arrives in a front-loaded wave -> concert page -> joins the waiting room -> polls the status
-// every POLL_SEC until admitted -> picks 1-4 seats (front rows preferred, so fans compete) -> holds them (retries on
+// every POLL_SEC until admitted -> picks 1-3 seats (front rows preferred, so fans compete) -> holds them (retries on
 // 409 seats_unavailable) -> pays (PAY_FAIL_RATE declined, then tries again) or abandons (ABANDON_RATE, releases the
 // hold). Every fan logs one `FANRESULT {json}` line (outcome, position, timings, 429s) for the wrapper's report.
 //
@@ -42,12 +42,11 @@ const BROWSE_DURATION = strEnv('BROWSE_DURATION', '8m');
 const REJOIN_AFTER_SEC = 60;
 const POLL = 'GET /api/waiting-room/:id/status';
 const JOIN = 'POST /api/waiting-room/:id/join';
-// 1 seat 15%, 2 seats 50%, 3 seats 15%, 4 seats 20% (the test concert's max per order is 4).
+// 1 seat 25%, 2 seats 55%, 3 seats 20% (a fan buys at most 3 seats per order; the test concert's max per order is 3).
 const QTY_WEIGHTS = [
-  [1, 0.15],
-  [2, 0.5],
-  [3, 0.15],
-  [4, 0.2],
+  [1, 0.25],
+  [2, 0.55],
+  [3, 0.2],
 ];
 
 if (FAN_OFFSET + FANS > FAN_COUNT) throw new Error(`need ${FAN_OFFSET + FANS} fans, tokens file has ${FAN_COUNT}`);

@@ -41,8 +41,8 @@ describe('concert discovery (Postgres)', { skip: process.env.DB_HOST ? false : '
     });
     await service.replaceTicketTypes(ORGANISER, concert.id, {
       ticketTypes: [
-        { name: 'CAT1', priceCents: 18_800, currency: 'SGD', quantity: 2, maxPerOrder: 4 },
-        { name: 'CAT2', priceCents: 12_800, currency: 'SGD', quantity: 3, maxPerOrder: 4 },
+        { name: 'CAT1', priceCents: 18_800, currency: 'SGD', quantity: 2, maxPerOrder: 3 },
+        { name: 'CAT2', priceCents: 12_800, currency: 'SGD', quantity: 3, maxPerOrder: 3 },
       ],
     });
     await service.replaceLayout(ORGANISER, concert.id, {

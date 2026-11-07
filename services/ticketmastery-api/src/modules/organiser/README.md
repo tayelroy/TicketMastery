@@ -21,6 +21,8 @@ Organisers only manage concerts where `organiser_id` equals their Cognito `sub` 
   concert is `on_sale`/`sold_out`/`cancelled`/`completed`, or `layout_locked_at` is set. The service checks
   this under `SELECT ... FOR UPDATE` and returns `409 layout_locked`; DB triggers enforce the same predicate
   (`concert_layout_locked(...)`) for any other writer. Seat status/hold updates are never blocked.
+- **Max per order**: a ticket type's `maxPerOrder` is 1–3 (default 3), because a fan buys at most 3 seats per
+  order (`MAX_SEATS_PER_ORDER` in `src/modules/seat-limits.ts`; migration 0005 adds the same CHECK).
 - **Seat count == quantity**: for every ticket type the layout must contain exactly `quantity` seats, so the
   seat map and inventory never disagree. Layout replacement and publish both enforce it.
 - **Layout payload**: `{ sections: [{ name, rows: [{ label, ticketTypeName, seats: { from, to } }
