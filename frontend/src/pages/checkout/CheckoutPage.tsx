@@ -4,8 +4,8 @@ import { api, ApiError } from '../../api/client';
 import { formatConcertDate, formatMoney, type Hold, type SeatMap } from './types';
 import './checkout.css';
 
-/** Same cap as the API (MAX_SEATS_PER_HOLD); the per-ticket-type limit comes from the seat map. */
-const MAX_SEATS_PER_HOLD = 20;
+/** Same cap as the API (MAX_SEATS_PER_ORDER): 1-3 seats per order; the per-ticket-type limit comes from the seat map. */
+const MAX_SEATS_PER_ORDER = 3;
 
 /**
  * A seat click refreshes the seat map first if it is older than this, so a fan who paused finds out a seat was
@@ -216,8 +216,8 @@ export function CheckoutPage() {
       setNotice(`You can pick up to ${type.maxPerOrder} ${type.name} seats per order.`);
       return;
     }
-    if (current.length >= MAX_SEATS_PER_HOLD) {
-      setNotice(`You can pick up to ${MAX_SEATS_PER_HOLD} seats per order.`);
+    if (current.length >= MAX_SEATS_PER_ORDER) {
+      setNotice(`You can pick up to ${MAX_SEATS_PER_ORDER} seats per order.`);
       return;
     }
     updateSelected([...current, seatId]);

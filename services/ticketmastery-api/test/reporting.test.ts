@@ -46,7 +46,7 @@ describe('UC5 sales reports (Postgres)', { skip: process.env.DB_HOST ? false : '
       startsAt: new Date(Date.now() + 3 * DAY_MS).toISOString(),
     });
     await organiser.replaceTicketTypes(organiserId, concert.id, {
-      ticketTypes: [{ name: 'GA', priceCents, currency: 'SGD', quantity, maxPerOrder: 4 }],
+      ticketTypes: [{ name: 'GA', priceCents, currency: 'SGD', quantity, maxPerOrder: 3 }],
     });
     await organiser.replaceLayout(organiserId, concert.id, {
       sections: [{ name: 'Floor', rows: [{ label: 'A', ticketTypeName: 'GA', seats: { from: 1, to: quantity } }] }],

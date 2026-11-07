@@ -144,7 +144,7 @@ describe(
             priceCents: 10_000,
             currency: "SGD",
             quantity: 10,
-            maxPerOrder: 4,
+            maxPerOrder: 3,
           },
           {
             name: "VIP",
@@ -223,7 +223,7 @@ describe(
             priceCents: 5_000,
             currency: "SGD",
             quantity: 4,
-            maxPerOrder: 4,
+            maxPerOrder: 3,
           },
         ],
         [{ label: "A", ticketTypeName: "GA", seats: { from: 1, to: 4 } }],

@@ -32,7 +32,7 @@ describe('UC5 cancellation notices (Postgres)', { skip: process.env.DB_HOST ? fa
       startsAt: new Date(Date.now() + 3 * day).toISOString(),
     });
     await organiser.replaceTicketTypes(ORGANISER, concert.id, {
-      ticketTypes: [{ name: 'GA', priceCents: 10_000, currency: 'SGD', quantity: 6, maxPerOrder: 4 }],
+      ticketTypes: [{ name: 'GA', priceCents: 10_000, currency: 'SGD', quantity: 6, maxPerOrder: 3 }],
     });
     await organiser.replaceLayout(ORGANISER, concert.id, {
       sections: [{ name: 'Floor', rows: [{ label: 'A', ticketTypeName: 'GA', seats: { from: 1, to: 6 } }] }],

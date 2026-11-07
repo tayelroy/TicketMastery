@@ -19,6 +19,7 @@ NNNN_<uc-or-owner>_<description>.sql
 0002_uc4_orders.sql
 0003_uc5_reporting_views.sql
 0004_uc5_reporting_role.sql
+0005_uc4_max_three_seats_per_order.sql
 ```
 
 - `NNNN`: 4-digit sequence. Numbers are **not** reserved per person or per use case: take the next free
@@ -44,6 +45,7 @@ NNNN_<uc-or-owner>_<description>.sql
 | `0002_uc4_orders.sql` | Shi Hui (UC4) | `orders`, `order_items`; adds FK `seats.order_id -> orders.id` and requires `order_id` on sold seats |
 | `0003_uc5_reporting_views.sql` | Elroy (UC5) | Read-only reporting views over UC5 + UC4 tables (`report_confirmed_orders`, `report_sales_by_concert`, `report_sales_by_ticket_type`, `report_sales_by_day`, `report_seat_status`; see `docs/reporting.md`). No table changes |
 | `0004_uc5_reporting_role.sql` | Elroy (UC5) | Role `reporting_ro` (NOLOGIN, read-only sessions, at most 10 connections) with `USAGE` on the schema and `SELECT` on the five `report_*` views only. Written for QuickSight (its comments say so); now the login of the `reporting` ECS service (`docs/reporting.md`). No table changes; LOGIN and the password are set by `loadtest/scripts/reporting-user.sh`, which stores them in the `<name>/reporting/reporting-ro` secret |
+| `0005_uc4_max_three_seats_per_order.sql` | Shi Hui (UC4), on Elroy's (UC5) `ticket_types` | 1–3 seats per order: clamps `ticket_types.max_per_order` to 3 (allowed after the layout lock), default 3, CHECK `ticket_types_max_per_order_range` (1–3). Matches `MAX_SEATS_PER_ORDER` in `src/modules/seat-limits.ts` |
 
 Seat hold columns on `seats` (`status`, `held_by`, `hold_id`, `held_at`, `hold_expires_at`, `sold_at`,
 `order_id`) are the contract with UC4 (Shi Hui); the canonical hold/confirm/release/sweep statements and why

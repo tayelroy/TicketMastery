@@ -23,7 +23,7 @@ describe('checkout holds (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
   let events: typeof CheckoutEventsModule;
   let errors: typeof ErrorsModule;
 
-  /** A concert with one GA row (S$100, max 4 per order) and one VIP row (S$250, max 2), sale open. */
+  /** A concert with one GA row (S$100, max 3 per order) and one VIP row (S$250, max 2), sale open. */
   async function createOnSaleConcert() {
     const day = 24 * 60 * 60 * 1000;
     const concert = await organiser.createConcert(ORGANISER, {
@@ -36,7 +36,7 @@ describe('checkout holds (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
     });
     await organiser.replaceTicketTypes(ORGANISER, concert.id, {
       ticketTypes: [
-        { name: 'GA', priceCents: 10_000, currency: 'SGD', quantity: 6, maxPerOrder: 4 },
+        { name: 'GA', priceCents: 10_000, currency: 'SGD', quantity: 6, maxPerOrder: 3 },
         { name: 'VIP', priceCents: 25_000, currency: 'SGD', quantity: 3, maxPerOrder: 2 },
       ],
     });

@@ -47,7 +47,7 @@ describe('UC2 my tickets (Postgres)', { skip: process.env.DB_HOST ? false : 'DB_
     });
     await organiser.replaceTicketTypes(ORGANISER, concert.id, {
       ticketTypes: [
-        { name: 'GA', priceCents: 10_000, currency: 'SGD', quantity: 10, maxPerOrder: 4 },
+        { name: 'GA', priceCents: 10_000, currency: 'SGD', quantity: 10, maxPerOrder: 3 },
         { name: 'VIP', priceCents: 25_000, currency: 'SGD', quantity: 3, maxPerOrder: 2 },
       ],
     });

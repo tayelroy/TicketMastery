@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_SEATS_PER_ORDER } from '../seat-limits';
 
 /** Upper bounds keep a single layout transaction (and request body) a sane size. */
 export const MAX_SEATS_PER_LAYOUT = 50_000;
@@ -54,7 +55,7 @@ export const replaceTicketTypesBody = z
             priceCents: z.number().int().min(0).max(10_000_000),
             currency: z.string().regex(/^[A-Z]{3}$/).default('SGD'),
             quantity: z.number().int().min(1).max(MAX_SEATS_PER_LAYOUT),
-            maxPerOrder: z.number().int().min(1).max(20).default(4),
+            maxPerOrder: z.number().int().min(1).max(MAX_SEATS_PER_ORDER).default(MAX_SEATS_PER_ORDER),
           })
           .strict(),
       )

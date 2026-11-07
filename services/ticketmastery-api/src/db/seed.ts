@@ -41,8 +41,8 @@ async function seed() {
   // 2 sections x 3 rows x 10 seats: rows A (CAT1) and B, C (CAT2) in each section.
   await service.replaceTicketTypes(ORGANISER_ID, concertId, {
     ticketTypes: [
-      { name: 'CAT1', description: 'Front rows', priceCents: 18_800, currency: 'SGD', quantity: 20, maxPerOrder: 4 },
-      { name: 'CAT2', description: 'Rear rows', priceCents: 12_800, currency: 'SGD', quantity: 40, maxPerOrder: 4 },
+      { name: 'CAT1', description: 'Front rows', priceCents: 18_800, currency: 'SGD', quantity: 20, maxPerOrder: 3 },
+      { name: 'CAT2', description: 'Rear rows', priceCents: 12_800, currency: 'SGD', quantity: 40, maxPerOrder: 3 },
     ],
   });
   const rows = [

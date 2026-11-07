@@ -121,7 +121,7 @@ owner:
 | UC1 | Concert discovery | Cody, Nai Xin | FR-1 list published concerts, with search (`q`, artist, venue) and date filters; detail with ticket types, prices and availability. FR-2 seat map showing available, held and sold seats (an expired hold shows as available) |
 | UC2 | My Tickets & Account | Andrew | FR-3 sign up, sign in and sign out with Cognito (email verification). FR-4 list the fan's confirmed orders, open an e-ticket, download its PDF through a short-lived link |
 | UC3 | Virtual waiting room | Yan Ting | FR-5 join, see the queue position, be admitted in arrival order in batches. FR-6 only admitted fans may hold seats; admission lasts 15 minutes |
-| UC4 | Seat selection & checkout | Shi Hui | FR-7 hold 1–20 seats for 10 minutes, all or nothing, one active hold per fan per concert. FR-8 simulated payment: success sells the seats, failure or timeout releases them. FR-9 email the e-ticket PDF after payment |
+| UC4 | Seat selection & checkout | Shi Hui | FR-7 hold 1–3 seats for 10 minutes, all or nothing, one active hold per fan per concert. FR-8 simulated payment: success sells the seats, failure or timeout releases them. FR-9 email the e-ticket PDF after payment |
 | UC5 | Concert & ticket management | Elroy | FR-10 create, edit, publish and cancel concerts; ticket types and seat layout, locked once the sale opens; cancelling emails every ticket holder. FR-11 live available, held and sold counts and revenue. FR-12 sales reporting (proposal: for a BI tool) |
 
 The six system use cases (autoscaling, flash-sale queue, monitoring, caching, load balancing, failure handling) are
@@ -378,7 +378,7 @@ RETURNING id;
 - **Other rules:**
   - prices are fixed at hold time, with a S$4 booking fee per seat;
   - one active hold per fan per concert;
-  - the ticket type's `max_per_order`;
+  - 1–3 seats per order, and at most the ticket type's `max_per_order` (also at most 3, enforced by a CHECK);
   - the sale window and the concert's status.
 - **Confirm (simulated payment).** Seats move `held → sold` only if the hold is the fan's and hasn't expired, and the
   order becomes `confirmed` in the same transaction. Then `OrderConfirmed` is published.
@@ -796,7 +796,7 @@ URL, and an organiser opened the live dashboard (Figure 5; full screenshots in `
 | `GET /api/concerts`, `/:id`, `/:id/seats` | public | List and search; detail with availability; seat map |
 | `GET /api/me`, `/api/me/orders`, `/api/me/tickets/:id`, `…/download` | fan | Identity; orders; one e-ticket; pre-signed PDF URL (300 s), `409 ticket_not_ready` until it exists |
 | `POST /api/waiting-room/:concertId/join`, `GET …/status` | fan | Join the queue; position and state |
-| `GET /api/checkout/concerts/:concertId/seats`; `POST`, `DELETE /api/checkout/holds[/:holdId]` | fan (hold: admitted) | Seat map with own hold; hold 1–20 seats for 10 min (`403 not_admitted`, `409 seats_unavailable`); release |
+| `GET /api/checkout/concerts/:concertId/seats`; `POST`, `DELETE /api/checkout/holds[/:holdId]` | fan (hold: admitted) | Seat map with own hold; hold 1–3 seats for 10 min (`403 not_admitted`, `409 seats_unavailable`); release |
 | `POST /api/checkout/holds/:holdId/confirm` | fan | Simulated payment; `402 payment_failed`, `409 hold_expired` |
 | `POST`, `GET /api/organiser/concerts[/:id]`; `PUT …/ticket-types`, `…/layout`; `POST …/publish`, `…/cancel`; `GET …/dashboard` | organiser | Drafts, lists, detail; replace types and layout; publish, cancel with reason; live counts and revenue |
 | `GET /api/reports/sales` (`days` = 7, 30, 90 or `all`; optional `concertId`) | organiser | Sales reports over the `report_*` views (`reporting_ro`) |

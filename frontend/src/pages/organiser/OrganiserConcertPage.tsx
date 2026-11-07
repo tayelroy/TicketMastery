@@ -196,7 +196,7 @@ const emptyTicketType = (): TicketTypeDraft => ({
   description: '',
   price: '',
   quantity: '',
-  maxPerOrder: '4',
+  maxPerOrder: '3',
   currency: 'SGD',
 });
 
@@ -271,7 +271,7 @@ function TicketTypesEditor({ concert, onSaved, path }: { concert: OrganiserConce
             <input aria-label="Description" maxLength={1000} placeholder="Optional" value={r.description} onChange={(e) => update(i, 'description', e.target.value)} />
             <input aria-label="Price" required type="number" min="0" step="0.01" value={r.price} onChange={(e) => update(i, 'price', e.target.value)} />
             <input aria-label="Quantity" required type="number" min="1" step="1" value={r.quantity} onChange={(e) => update(i, 'quantity', e.target.value)} />
-            <input aria-label="Max per order" required type="number" min="1" max="20" step="1" value={r.maxPerOrder} onChange={(e) => update(i, 'maxPerOrder', e.target.value)} />
+            <input aria-label="Max per order" required type="number" min="1" max="3" step="1" value={r.maxPerOrder} onChange={(e) => update(i, 'maxPerOrder', e.target.value)} />
             <button
               type="button"
               className="link"

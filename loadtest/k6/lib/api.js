@@ -66,7 +66,7 @@ export function createLoadTestConcert({ seats, saleOpensInSec, title, waitForSal
   must(
     call('PUT', `/api/organiser/concerts/${concertId}/ticket-types`, {
       headers: org.headers,
-      body: { ticketTypes: [{ name: 'GA', priceCents: 5000, quantity: seats, maxPerOrder: 4 }] },
+      body: { ticketTypes: [{ name: 'GA', priceCents: 5000, quantity: seats, maxPerOrder: 3 }] },
     }),
     'ticket types',
   );
