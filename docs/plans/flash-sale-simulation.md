@@ -78,8 +78,8 @@ sale, so the run also shows that browsing load scales `discovery` and not `check
 - **Cleanup.** The test concert is cancelled on every exit, including after an error, so it never stays in the public
   listing (`KEEP_CONCERT=1` keeps it). `CLEANUP=1` also deletes the test users; without it they are kept for a rerun
   within the 60-minute token lifetime.
-- **Sleep.** On macOS the script re-runs itself under `caffeinate`: a laptop that sleeps mid-run pauses every fan
-  (seen in testing: 8 minutes with no requests, then fans timing out).
+- **Sleep.** A run takes 5–20 minutes. If the computer sleeps mid-run every fan pauses (seen in testing: 8 minutes
+  with no requests, then fans timing out), so keep it awake and plugged in while a run is going.
 
 ## Steps
 
@@ -91,8 +91,9 @@ sale, so the run also shows that browsing load scales `discovery` and not `check
 
 ## First run (7 Nov 2026, `smoke`)
 
-40 fans for 30 seats, browsing at 5 req/s: **all checks PASS**. 13 orders sold all 30 seats (0 seats in two orders,
-SQL check), 26 fans found it sold out, 1 abandoned; 25 lost seat races (409); 0 5xx, 0 429. Arrival to admission
+40 fans for 30 seats, browsing at 5 req/s: **all checks PASS**. 13 orders sold all 30 seats, because an order holds 1–4
+seats (1 order of 1 seat, 9 of 2, 1 of 3, 2 of 4 = 30); the SQL check agrees: 13 confirmed orders, 30 seats in them,
+30 seats sold, 0 seats in two orders. 26 fans found it sold out, 1 abandoned; 25 lost seat races (409); 0 5xx, 0 429. Arrival to admission
 p95 53 s (one admit run a minute), arrival to order p95 52 s; hold p95 286 ms. 13 e-tickets, p95 6 s. Peak 9 RDS
 connections of `max_connections` **79** (the live value, read by the preflight); no service scaled and no alarm
 fired at this size. Report: `loadtest/results/flash-sale-20261107T021752Z.md`.
